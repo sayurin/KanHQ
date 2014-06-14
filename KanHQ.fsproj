@@ -64,6 +64,8 @@
     <Compile Include="WebBrowser2.fs" />
     <Compile Include="Form2.fs" />
     <Compile Include="Json.fs" />
+    <Compile Include="ZlibStream.fs" />
+    <Compile Include="SwfParser.fs" />
     <Compile Include="Mixer.fs" />
     <Compile Include="Capture.fs" />
     <Compile Include="OAuth.fs" />
@@ -81,6 +83,7 @@
     <EmbeddedResource Include="ScreenShot.png" Condition=" '$(Configuration)' == 'LightRelease' " />
     <EmbeddedResource Include="Tweet.png" Condition=" '$(Configuration)' == 'LightRelease' " />
     <EmbeddedResource Include="Volume.png" Condition=" '$(Configuration)' == 'LightRelease' " />
+    <None Include="KanHQ.snk" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="FiddlerCore" Condition=" '$(Configuration)' != 'LightRelease' ">

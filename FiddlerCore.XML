@@ -374,6 +374,12 @@
             <param name="sFilename"></param>
             <returns></returns>
         </member>
+        <member name="M:Fiddler.Session._GetSuggestedFilenameExt">
+            <summary>
+            Examines the MIME type, and if ambiguous, returns sniffs the body.
+            </summary>
+            <returns></returns>
+        </member>
         <member name="M:Fiddler.Session.FireContinueTransaction(Fiddler.Session,Fiddler.Session,Fiddler.ContinueTransactionReason)">
             <summary>
             Notify extensions if this Session naturally led to another (e.g. due to redirect chasing or Automatic Authentication)
@@ -2711,13 +2717,22 @@
         </member>
         <member name="T:Fiddler.frmPrompt">
             <summary>
-            Summary description for frmPrompt.
+            The frmPrompt class is used to get information from the client. It's primarily used by calling one of the <see cref="M:Fiddler.frmPrompt.GetUserString(System.String,System.String,System.String)"/> static functions.
             </summary>
         </member>
         <member name="F:Fiddler.frmPrompt.components">
             <summary>
             Required designer variable.
             </summary>
+        </member>
+        <member name="M:Fiddler.frmPrompt.GetUserString(System.String,System.String,System.String)">
+            <summary>
+            Get a string value from the user.
+            </summary>
+            <param name="sTitle">The title of the dialog</param>
+            <param name="sPrompt">The prompt text</param>
+            <param name="sDefault">The default string value</param>
+            <returns>The value entered by the user (or default, if unmodified)</returns>
         </member>
         <member name="M:Fiddler.frmPrompt.GetUserString(System.String,System.String,System.String,System.Boolean)">
             <summary>
@@ -2726,7 +2741,7 @@
             <param name="sTitle">Title of the dialog</param>
             <param name="sPrompt">The prompt text in the dialog</param>
             <param name="sDefault">The default response</param>
-            <param name="bReturnNullIfCancelled">If true, will return null if user hits cancel.  Else returns sDefault.</param>
+            <param name="bReturnNullIfCancelled">If true, will return null if user hits cancel. Else returns sDefault.</param>
             <returns>The user's result, or null if user cancelled and bReturnNullIfCancelled set.</returns>
         </member>
         <member name="M:Fiddler.frmPrompt.Dispose(System.Boolean)">
@@ -2895,7 +2910,7 @@
         </member>
         <member name="M:Fiddler.DefaultCertificateProvider.LoadCertificateFromWindowsStore(System.String)">
             <summary>
-            Find a certificate from the CurrentUser certificate store, if present.
+            Find (but do not create!) a certificate from the CurrentUser certificate store, if present.
             </summary>
             <remarks>No locks are acquired by this method itself.</remarks>
             <returns>A certificate or /null/</returns>
@@ -5558,19 +5573,19 @@
             </summary>
         </member>
         <member name="M:Fiddler.ServerChatter.SendHTTPCONNECTToGateway(System.Net.Sockets.Socket,System.String,System.Int32,Fiddler.HTTPRequestHeaders)">
-            <summary>
-            TODO: This entire function needs to go away. What we really want to do is generate a new Session that is a CONNECT tunnel and
-            pass it through the normal request processing pipeline. That allows us to automatically authenticate using the user's Windows
-            credentials.
+             <summary>
+             TODO: Almost all of this function needs to go away. What we really want to do is generate a new Session that is a CONNECT tunnel (with the matching UA/proxycreds 
+             and pass it through the normal request processing pipeline. That allows us to automatically authenticate using the user's Windows
+             credentials.
             
-            Sends a CONNECT to the specified socket acting as a gateway proxy and waits for a 200 OK response. This method is used when Fiddler needs
-            a HTTPS Connection through a proxy but the client didn't establish one (e.g. the Request Composer). Note: May THROW
-            </summary>
-            <param name="oGWSocket">The Socket</param>
-            <param name="sHost">The host to which the gateway should connect</param>
-            <param name="iPort">The port to which the gateway should connect</param>
-            <param name="oRH">The HTTPRequestHeaders from the original request</param>
-            <returns>TRUE if a 200 OK was received, FALSE if something else was received, THROWS EXCEPTION on network errors</returns>
+             Sends a CONNECT to the specified socket acting as a gateway proxy and waits for a 200 OK response. This method is used when Fiddler needs
+             a HTTPS Connection through a proxy but the client didn't establish one (e.g. the Request Composer). Note: May THROW
+             </summary>
+             <param name="oGWSocket">The Socket</param>
+             <param name="sHost">The host to which the gateway should connect</param>
+             <param name="iPort">The port to which the gateway should connect</param>
+             <param name="oRH">The HTTPRequestHeaders from the original request</param>
+             <returns>TRUE if a 200 OK was received, FALSE if something else was received, THROWS EXCEPTION on network errors</returns>
         </member>
         <member name="M:Fiddler.ServerChatter.CreateConnectedSocket(System.Net.IPEndPoint[],Fiddler.Session)">
             <summary>

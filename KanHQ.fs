@@ -7,6 +7,7 @@ open System.Drawing.Drawing2D
 open System.Drawing.Imaging
 open System.Globalization
 open System.IO
+open System.IO.IsolatedStorage
 open System.Net
 open System.Net.NetworkInformation
 open System.Reflection
@@ -20,11 +21,11 @@ open Sayuri.FSharp.Local
 open Sayuri.JsonSerializer
 open Sayuri.Windows.Forms
 
-[<assembly: AssemblyCompany "Haxe"; AssemblyProduct "KanHQ"; AssemblyCopyright "Copyright ©  2013,2014 はぇ～">]
+[<assembly: AssemblyCompany "Haxe"; AssemblyProduct "KanHQ"; AssemblyCopyright "Copyright ©  2013,2014 はぇ～"; AssemblyKeyFile "KanHQ.snk">]
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.6.4.1"; AssemblyVersion "0.6.4.1">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.7.0.0"; AssemblyVersion "0.7.0.0">]
 #endif
 do
     let values = [|
@@ -353,6 +354,8 @@ let mainWindow () = createForm 864 480 "艦これ 司令部室 Light" (fun form 
 
 // 初回に初期化される。lock不要。Countプロパティで要素の有無を確認すれば十分。
 let masterShips = Dictionary()
+let masterGraph = Dictionary()
+let masterStypes = Dictionary()
 let masterSlotitems = Dictionary()
 let masterMissions = Dictionary()
 
@@ -363,11 +366,18 @@ let slotitems = Dictionary()
 // 一括更新される。lock不要。
 let mutable decks = [||]
 
-type SortableBindingList<'T>(array : 'T[]) =
-    inherit BindingList<'T>(array)
+[<AttributeUsage(AttributeTargets.Property)>]
+type SortAttribute (name) =
+    inherit Attribute ()
+    member this.Name = name
+
+type SortableBindingList<'T> private (items : IList<_>) =
+    inherit BindingList<'T>(items)
     let mutable isSorted = false
     let mutable listSortDirection = ListSortDirection.Ascending
     let mutable propertyDescriptor = null
+    new (array : _[]) = SortableBindingList(array :> IList<_>)
+    new () = SortableBindingList(ResizeArray())
     override this.SupportsSortingCore = true
     override this.IsSortedCore = isSorted
     override this.SortPropertyCore = propertyDescriptor
@@ -375,10 +385,17 @@ type SortableBindingList<'T>(array : 'T[]) =
     member this.OnListChanged() =
         this.OnListChanged(ListChangedEventArgs(ListChangedType.Reset, -1))
     override this.ApplySortCore(property, direction) =
+        let get = match Seq.cast<Attribute> property.Attributes |> Seq.tryPick (function :? SortAttribute as sort -> Some(typeof<'T>.GetProperty sort.Name) | _ -> None) with
+                  | Some prop -> fun item -> prop.GetValue(item, null) :?> IComparable
+                  | None      -> fun item -> property.GetValue item :?> IComparable
+
         // use Seq.sortBy, this is stable sort. TODO: reverse is not stable.
-        let sorted = Seq.sortBy (fun item -> property.GetValue item :?> IComparable) array |> Array.ofSeq
-        if direction <> ListSortDirection.Ascending then Array.Reverse sorted
-        Array.blit sorted 0 array 0 array.Length
+        let sorted = Seq.sortBy get items |> Array.ofSeq
+        if direction = ListSortDirection.Ascending then
+            Array.iteri (fun i item -> items.[i] <- item) sorted
+        else
+            let length = sorted.Length - 1
+            Array.iteri (fun i item -> items.[length - i] <- item) sorted
         isSorted <- true
         propertyDescriptor <- property
         listSortDirection <- direction
@@ -402,42 +419,43 @@ type Result =
 
 type Mission (index : int, name : string, duration : int, flagshipLevel : int, totalLevel : int, condition : int list list, drumShips : int, drumCount : int,
               exp : int, getFuel : int, getBullet : int, getSteel : int, getBauxite : int, useFuel : int, useBullet : int) =
-    static let stypes = dict [[], "任意"; [2], "駆"; [3], "軽"; [5], "重"; [7;11;16;18], "空母"; [10], "航戦"; [13;14], "潜"; [16], "水母";]
+    static let stypes = dict [[], "任意"; [2], "駆"; [3], "軽"; [5], "重"; [7;11;16;18], "空母"; [10], "航戦"; [13;14], "潜"; [16], "水母"; [20], "潜母"]
     static let missions = [|
-        Mission( 1, "練習航海",               15,  1,   0, [[];           [];                                          ], 0, 0,  10,   0,  30,   0,   0, 3, 0)
-        Mission( 2, "長距離練習航海",         30,  2,   0, [[];           [];           [];           [];              ], 0, 0,  15,   0, 100,  30,   0, 5, 0)
-        Mission( 3, "警備任務",               20,  3,   0, [[];           [];           [];                            ], 0, 0,  30,  30,  30,  40,   0, 3, 2)
-        Mission( 4, "対潜警戒任務",           50,  3,   0, [[3];          [2];          [2];                           ], 0, 0,  40,   0,  60,   0,   0, 5, 0)
-        Mission( 5, "海上護衛任務",           90,  3,   0, [[3];          [2];          [2];          [];              ], 0, 0,  40, 200, 200,  20,  20, 5, 0)
-        Mission( 6, "防空射撃演習",           40,  4,   0, [[];           [];           [];           [];              ], 0, 0,  50,   0,   0,   0,  80, 3, 2)
-        Mission( 7, "観艦式予行",             60,  5,   0, [[];           [];           [];           [];      [];  [] ], 0, 0, 120,   0,   0,  50,  30, 5, 0)
-        Mission( 8, "観艦式",                180,  6,   0, [[];           [];           [];           [];      [];  [] ], 0, 0, 140,  50, 100,  50,  50, 5, 2)
-        Mission( 9, "タンカー護衛任務",      240,  3,   0, [[3];          [2];          [2];          [];              ], 0, 0,  60, 350,   0,   0,   0, 5, 0)
-        Mission(10, "強行偵察任務",           90,  3,   0, [[3];          [3];          [];                            ], 0, 0,  50,   0,  50,   0,  30, 3, 0)
-        Mission(11, "ボーキサイト輸送任務",  300,  6,   0, [[2];          [2];          [];           [];              ], 0, 0,  40,   0,   0,   0, 250, 5, 0)
-        Mission(12, "資源輸送任務",          480,  4,   0, [[2];          [2];          [];           [];              ], 0, 0,  50,  50, 250, 200,  50, 5, 0)
-        Mission(13, "鼠輸送作戦",            240,  5,   0, [[3];          [2];          [2];          [2];     [2]; [] ], 0, 0,  60, 240, 300,   0,   0, 5, 4)
-        Mission(14, "包囲陸戦隊撤収作戦",    360,  6,   0, [[3];          [2];          [2];          [2];     [];  [] ], 0, 0, 100,   0, 240, 200,   0, 5, 0)
-        Mission(15, "囮機動部隊支援作戦",    720,  8,   0, [[7;11;16;18]; [7;11;16;18]; [2];          [2];     [];  [] ], 0, 0, 160,   0,   0, 300, 400, 5, 4)
-        Mission(16, "艦隊決戦援護作戦",      900, 10,   0, [[3];          [2];          [2];          [];      [];  [] ], 0, 0, 200, 500, 500, 200, 200, 5, 4)
-        Mission(17, "敵地偵察作戦",           45, 20,   0, [[3];          [2];          [2];          [2];     [];  [] ], 0, 0,  40,  70,  70,  50,   0, 3, 4)
-        Mission(18, "航空機輸送作戦",        300, 15,   0, [[7;11;16;18]; [7;11;16;18]; [7;11;16;18]; [2];     [2]; [] ], 0, 0,  60,   0,   0, 300, 100, 5, 2)
-        Mission(19, "北号作戦",              360, 20,   0, [[10];         [10];         [2];          [2];     [];  [] ], 0, 0,  70, 400,   0,  50,  30, 5, 4)
-        Mission(20, "潜水艦哨戒任務",        120,  1,   0, [[13;14];      [3];                                         ], 0, 0,  50,   0,   0, 150,   0, 5, 4)
-        Mission(21, "北方鼠輸送作戦",        140, 15,  30, [[3];          [2];          [2];          [2];     [2];    ], 3, 3,  55, 320, 270,   0,   0, 8, 7)
-        Mission(22, "艦隊演習",              180, 30,  45, [[5];          [3];          [2];          [2];     [];  [] ], 0, 0, 400,   0,  10,   0,   0, 8, 7)
-        Mission(23, "航空戦艦運用演習",      240, 50, 200, [[10];         [10];         [2];          [2];     [];  [] ], 0, 0, 420,   0,  20,   0, 100, 8, 8)
-        Mission(25, "通商破壊作戦",         2400, 25,   0, [[5];          [5];          [2];          [2];             ], 0, 0, 180, 900,   0, 500,   0, 5, 8)
-        Mission(26, "敵母港空襲作戦",       4800, 30,   0, [[7;11;16;18]; [3];          [2];          [2];             ], 0, 0, 200,   0,   0,   0, 900, 8, 8)
-        Mission(27, "潜水艦通商破壊作戦",   1200,  1,   0, [[13;14];      [13;14];                                     ], 0, 0,  60,   0,   0, 800,   0, 8, 8)
-        Mission(28, "西方海域封鎖作戦",     1500, 30,   0, [[13;14];      [13;14];      [13;14];                       ], 0, 0, 140,   0,   0, 900, 350, 8, 8)
-        Mission(29, "潜水艦派遣演習",       1440, 50,   0, [[13;14];      [13;14];      [13;14];                       ], 0, 0, 100,   0,   0,   0, 100, 9, 4)
-        Mission(30, "潜水艦派遣作戦",       2880, 55,   0, [[13;14];      [13;14];      [13;14];      [13;14];         ], 0, 0, 150,   0,   0,   0, 100, 9, 7)
-        Mission(31, "海外艦との接触",        120, 60, 200, [[13;14];      [13;14];      [13;14];      [13;14];         ], 0, 0,  50,   0,  30,   0,   0, 5, 0)
-        Mission(35, "MO作戦",                420, 40,   0, [[7;11;16;18]; [7;11;16;18]; [5];          [2];     [];  [] ], 0, 0, 100,   0,   0, 240, 280, 8, 8)
-        Mission(36, "水上機基地建設",        540, 30,   0, [[16];         [16];         [3];          [2];     [];  [] ], 0, 0, 100, 480,   0, 200, 200, 8, 8)
-        Mission(37, "東京急行",              165, 50, 200, [[3];          [2];          [2];          [2];     [2]; [2]], 4, 4,  65,   0, 380, 270,   0, 8, 8)
-        Mission(38, "東京急行(弐)",          175, 65, 240, [[2];          [2];          [2];          [2];     [2]; [] ], 4, 8,  70, 420,   0, 200,   0, 8, 8)
+        Mission( 1, "練習航海",               15,  1,   0, [[];           [];                                              ], 0, 0,  10,   0,  30,   0,   0, 3, 0)
+        Mission( 2, "長距離練習航海",         30,  2,   0, [[];           [];           [];           [];                  ], 0, 0,  15,   0, 100,  30,   0, 5, 0)
+        Mission( 3, "警備任務",               20,  3,   0, [[];           [];           [];                                ], 0, 0,  30,  30,  30,  40,   0, 3, 2)
+        Mission( 4, "対潜警戒任務",           50,  3,   0, [[3];          [2];          [2];                               ], 0, 0,  40,   0,  60,   0,   0, 5, 0)
+        Mission( 5, "海上護衛任務",           90,  3,   0, [[3];          [2];          [2];          [];                  ], 0, 0,  40, 200, 200,  20,  20, 5, 0)
+        Mission( 6, "防空射撃演習",           40,  4,   0, [[];           [];           [];           [];                  ], 0, 0,  50,   0,   0,   0,  80, 3, 2)
+        Mission( 7, "観艦式予行",             60,  5,   0, [[];           [];           [];           [];      [];      [] ], 0, 0, 120,   0,   0,  50,  30, 5, 0)
+        Mission( 8, "観艦式",                180,  6,   0, [[];           [];           [];           [];      [];      [] ], 0, 0, 140,  50, 100,  50,  50, 5, 2)
+        Mission( 9, "タンカー護衛任務",      240,  3,   0, [[3];          [2];          [2];          [];                  ], 0, 0,  60, 350,   0,   0,   0, 5, 0)
+        Mission(10, "強行偵察任務",           90,  3,   0, [[3];          [3];          [];                                ], 0, 0,  50,   0,  50,   0,  30, 3, 0)
+        Mission(11, "ボーキサイト輸送任務",  300,  6,   0, [[2];          [2];          [];           [];                  ], 0, 0,  40,   0,   0,   0, 250, 5, 0)
+        Mission(12, "資源輸送任務",          480,  4,   0, [[2];          [2];          [];           [];                  ], 0, 0,  50,  50, 250, 200,  50, 5, 0)
+        Mission(13, "鼠輸送作戦",            240,  5,   0, [[3];          [2];          [2];          [2];     [2];     [] ], 0, 0,  60, 240, 300,   0,   0, 5, 4)
+        Mission(14, "包囲陸戦隊撤収作戦",    360,  6,   0, [[3];          [2];          [2];          [2];     [];      [] ], 0, 0, 100,   0, 240, 200,   0, 5, 0)
+        Mission(15, "囮機動部隊支援作戦",    720,  8,   0, [[7;11;16;18]; [7;11;16;18]; [2];          [2];     [];      [] ], 0, 0, 160,   0,   0, 300, 400, 5, 4)
+        Mission(16, "艦隊決戦援護作戦",      900, 10,   0, [[3];          [2];          [2];          [];      [];      [] ], 0, 0, 200, 500, 500, 200, 200, 5, 4)
+        Mission(17, "敵地偵察作戦",           45, 20,   0, [[3];          [2];          [2];          [2];     [];      [] ], 0, 0,  40,  70,  70,  50,   0, 3, 4)
+        Mission(18, "航空機輸送作戦",        300, 15,   0, [[7;11;16;18]; [7;11;16;18]; [7;11;16;18]; [2];     [2];     [] ], 0, 0,  60,   0,   0, 300, 100, 5, 2)
+        Mission(19, "北号作戦",              360, 20,   0, [[10];         [10];         [2];          [2];     [];      [] ], 0, 0,  70, 400,   0,  50,  30, 5, 4)
+        Mission(20, "潜水艦哨戒任務",        120,  1,   0, [[13;14];      [3];                                             ], 0, 0,  50,   0,   0, 150,   0, 5, 4)
+        Mission(21, "北方鼠輸送作戦",        140, 15,  30, [[3];          [2];          [2];          [2];     [2];        ], 3, 3,  55, 320, 270,   0,   0, 8, 7)
+        Mission(22, "艦隊演習",              180, 30,  45, [[5];          [3];          [2];          [2];     [];      [] ], 0, 0, 400,   0,  10,   0,   0, 8, 7)
+        Mission(23, "航空戦艦運用演習",      240, 50, 200, [[10];         [10];         [2];          [2];     [];      [] ], 0, 0, 420,   0,  20,   0, 100, 8, 8)
+        Mission(25, "通商破壊作戦",         2400, 25,   0, [[5];          [5];          [2];          [2];                 ], 0, 0, 180, 900,   0, 500,   0, 5, 8)
+        Mission(26, "敵母港空襲作戦",       4800, 30,   0, [[7;11;16;18]; [3];          [2];          [2];                 ], 0, 0, 200,   0,   0,   0, 900, 8, 8)
+        Mission(27, "潜水艦通商破壊作戦",   1200,  1,   0, [[13;14];      [13;14];                                         ], 0, 0,  60,   0,   0, 800,   0, 8, 8)
+        Mission(28, "西方海域封鎖作戦",     1500, 30,   0, [[13;14];      [13;14];      [13;14];                           ], 0, 0, 140,   0,   0, 900, 350, 8, 8)
+        Mission(29, "潜水艦派遣演習",       1440, 50,   0, [[13;14];      [13;14];      [13;14];                           ], 0, 0, 100,   0,   0,   0, 100, 9, 4)
+        Mission(30, "潜水艦派遣作戦",       2880, 55,   0, [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0, 150,   0,   0,   0, 100, 9, 7)
+        Mission(31, "海外艦との接触",        120, 60, 200, [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0,  50,   0,  30,   0,   0, 5, 0)
+        Mission(35, "MO作戦",                420, 40,   0, [[7;11;16;18]; [7;11;16;18]; [5];          [2];     [];      [] ], 0, 0, 100,   0,   0, 240, 280, 8, 8)
+        Mission(36, "水上機基地建設",        540, 30,   0, [[16];         [16];         [3];          [2];     [];      [] ], 0, 0, 100, 480,   0, 200, 200, 8, 8)
+        Mission(37, "東京急行",              165, 50, 200, [[3];          [2];          [2];          [2];     [2];     [2]], 4, 4,  65,   0, 380, 270,   0, 8, 8)
+        Mission(38, "東京急行(弐)",          175, 65, 240, [[2];          [2];          [2];          [2];     [2];     [] ], 4, 8,  70, 420,   0, 200,   0, 8, 8)
+        Mission(39, "遠洋潜水艦作戦",       1800,  3, 180, [[20];         [13;14];      [13;14];      [13;14]; [13;14];    ], 0, 0,  -1,   0,   0, 300,   0, 9, 9)
     |]
     static let bindingList = SortableBindingList missions
     static let mutable bindedForm = null
@@ -515,7 +533,7 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
         steel <- int (float getSteel * daihatsu)
         bauxite <- int (float getBauxite * daihatsu)
 
-let missionWindow = lazy(createForm 829 789 "艦これ 司令部室 - 遠征計画" (fun form ->
+let missionWindow = lazy(createForm 829 809 "艦これ 司令部室 - 遠征計画" (fun form ->
     let decks = [|
         new RadioButton(AutoSize = true, Location = Point( 13, 13), Text = "第2艦隊", UseVisualStyleBackColor = true, Checked = true)
         new RadioButton(AutoSize = true, Location = Point( 83, 13), Text = "第3艦隊", UseVisualStyleBackColor = true)
@@ -524,7 +542,7 @@ let missionWindow = lazy(createForm 829 789 "艦これ 司令部室 - 遠征計�
     decks |> Array.iteri (fun i rb -> rb.CheckedChanged.Add(fun _ -> if rb.Checked then Mission.UpdateIndex(i + 1)))
     let hourly = new CheckBox(Size = Size(48, 16), Location = Point(729, 13), Anchor = anchorTR, Text = "時給", UseVisualStyleBackColor = true)
     hourly.CheckedChanged.Add(fun _ -> Mission.UpdateHourly hourly.Checked)
-    let grid = new DataGridView(Size = Size(829, 754), Location = Point(0, 35), Anchor = (AnchorStyles.Top ||| AnchorStyles.Bottom ||| AnchorStyles.Left ||| AnchorStyles.Right),
+    let grid = new DataGridView(Size = Size(829, 774), Location = Point(0, 35), Anchor = (AnchorStyles.Top ||| AnchorStyles.Bottom ||| AnchorStyles.Left ||| AnchorStyles.Right),
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false,
                                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing)
                                 // , RowTemplate.Height = 21
@@ -554,6 +572,139 @@ let missionWindow = lazy(createForm 829 789 "艦これ 司令部室 - 遠征計�
     Array.iter form.Controls.Add decks
     form.Controls.Add hourly
     form.Controls.Add grid
+    form.Closing.Add(fun e -> e.Cancel <- true; form.Hide())))
+
+type Ship (id : float) =
+    static let bindingList = SortableBindingList<Ship>(RaiseListChangedEvents = false)
+    static let mutable bindedForm = null
+    static member GetBindingList (form : Form) =
+        bindedForm <- form
+        bindingList
+    static member UpdateShips () =
+        let ids = Dictionary()
+        bindingList |> Seq.iteri (fun i item -> ids.Add(item.Index, i) |> ignore)
+        lock ships (fun () -> ships |> Seq.iter (fun pair -> let id = pair.Key
+                                                             let ship = match ids.TryGetValue id with
+                                                                        | true, i  -> ids.Remove id |> ignore
+                                                                                      bindingList.[i]
+                                                                        | false, _ -> let ship = Ship id
+                                                                                      bindingList.Add ship
+                                                                                      ship
+                                                             ship.Update pair.Value))
+        ids |> Seq.map (fun pair -> pair.Value) |> Seq.sortBy (~-) |> Seq.iter (fun i -> bindingList.RemoveAt i)
+        if bindedForm <> null then bindedForm.BeginInvoke(MethodInvoker bindingList.OnListChanged) |> ignore
+    member this.Index = id
+    member val ShipId = 0.0 with get, set
+    member val NameSortNo = 0 with get, set
+    [<Sort "NameSortNo">]
+    member val Name = "" with get, set
+    member val StypeSortNo = 0 with get, set
+    [<Sort "StypeSortNo">]
+    member val Stype = "" with get, set
+    member val Level = 0 with get, set
+    member val Exp = 0 with get, set
+    member val Condition = 0 with get, set
+    member val Hp = 0.0 with get, set
+    member val Karyoku = 0 with get, set
+    member val Taiku = 0 with get, set
+    member val Raisou = 0 with get, set
+    member val Soukou = 0 with get, set
+    member val Kaihi = 0 with get, set
+    //member val Tousai = 0 with get, set
+    member val Taisen = 0 with get, set
+    //member val Sokuryoku = 0 with get, set
+    member val Sakuteki = 0 with get, set
+    member val Lucky = 0 with get, set
+    member val NdockTimeSpan = TimeSpan.Zero with get, set
+    [<Sort "NdockTimeSpan">]
+    member val NdockTime = "-" with get, set
+    member this.Update ship =
+        let shipId = get "api_ship_id" ship |> getNumber
+        this.ShipId <- shipId
+        let masterShip = masterShips.[shipId]
+        this.NameSortNo <- getNumber masterShip.["api_sortno"] |> int
+        this.Name <- getString masterShip.["api_name"]
+        let stype = masterStypes.[getNumber masterShip.["api_stype"]]
+        this.StypeSortNo <- get "api_sortno" stype |> getNumber |> int
+        this.Stype <- getString stype.["api_name"]
+        this.Level <- getNumber ship.["api_lv"] |> int
+        this.Exp <- match ship.["api_exp"] with JsonArray array -> getNumber array.[2] |> int | _ -> 0
+        this.Condition <- getNumber ship.["api_cond"] |> int
+        this.Hp <- getNumber ship.["api_nowhp"]
+        this.Karyoku <- getNumber (getArray ship.["api_karyoku"]).[0] |> int
+        this.Taiku <- getNumber (getArray ship.["api_taiku"]).[0] |> int
+        this.Raisou <- getNumber (getArray ship.["api_raisou"]).[0] |> int
+        this.Soukou <- getNumber (getArray ship.["api_soukou"]).[0] |> int
+        this.Kaihi <- getNumber (getArray ship.["api_kaihi"]).[0] |> int
+        this.Taisen <- getNumber (getArray ship.["api_taisen"]).[0] |> int
+        this.Sakuteki <- getNumber (getArray ship.["api_sakuteki"]).[0] |> int
+        this.Lucky <- getNumber (getArray ship.["api_lucky"]).[0] |> int
+        let ndock = getNumber ship.["api_ndock_time"] |> TimeSpan.FromMilliseconds
+        this.NdockTimeSpan <- ndock
+        this.NdockTime <- if ndock = TimeSpan.Zero    then "-"
+                          elif ndock.TotalHours < 1.0 then sprintf "%d:%02d" (int ndock.TotalMinutes) ndock.Seconds
+                                                      else sprintf "%d:%02d:%02d" (int ndock.TotalHours) ndock.Minutes ndock.Seconds
+
+let shipWindow = lazy(createForm 820 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
+    let grid = new DataGridView(Dock = DockStyle.Fill,
+                                RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false)
+    (grid :> ISupportInitialize).BeginInit()
+    grid.DefaultCellStyle <- DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleRight, WrapMode = DataGridViewTriState.False)
+    grid.ColumnHeadersDefaultCellStyle.WrapMode <- DataGridViewTriState.False
+    let left = DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleLeft)
+    grid.Columns.AddRange [|
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Index",        HeaderText = "New")                           :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 30, DataPropertyName = "ShipId",       HeaderText = "ID")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Stype",        HeaderText = "艦種", DefaultCellStyle = left) :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Name",         HeaderText = "艦名", DefaultCellStyle = left) :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Level",        HeaderText = "レベル")                        :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Exp",          HeaderText = "経験値")                        :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Condition",    HeaderText = "状態")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Hp",           HeaderText = "耐久")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Karyoku",      HeaderText = "火力")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Taiku",        HeaderText = "対空")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Raisou",       HeaderText = "雷装")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Soukou",       HeaderText = "装甲")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Kaihi",        HeaderText = "回避")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Taisen",       HeaderText = "対潜")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Sakuteki",     HeaderText = "索敵")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Lucky",        HeaderText = "運")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 60, DataPropertyName = "NdockTime",    HeaderText = "修理時間")                      :> DataGridViewColumn
+    |]
+    let bindingList = Ship.GetBindingList form
+    grid.DataSource <- bindingList
+    grid.CellDoubleClick.Add(fun c ->
+        use storage = IsolatedStorageFile.GetUserStoreForAssembly()
+        let ship = bindingList.[c.RowIndex]
+        let map = masterShips |> Seq.choose (fun pair -> match getString pair.Value.["api_aftershipid"] with "0" -> None | afterid -> Some (float afterid, pair.Key)) |> dict
+        let images = Some ship.ShipId
+                  |> Seq.unfold (Option.map (fun id -> get "api_filename" masterGraph.[id] |> getString, match map.TryGetValue id with true, id -> Some id | false, _ -> None))
+                  |> Seq.distinct
+                  |> Seq.map (fun name -> try
+                                              use file = new IsolatedStorageFileStream(sprintf "ships/%s.swf" name, FileMode.Open, storage)
+                                              SwfParser.parse file |> List.choose (fun image -> match image.CharacterID with
+                                                                                                | 17 | 19 -> use stream = new MemoryStream(image.Bytes)
+                                                                                                             Some (new Bitmap(stream))
+                                                                                                | _ -> None)
+                                          with :? IOException -> [])
+                  |> List.concat
+        if images.Length = 0 then () else
+        let form = createForm 1 1 (sprintf "艦これ 司令部室 - %s" ship.Name) (fun form ->
+            form.AutoSize <- true
+            form.AutoSizeMode <- AutoSizeMode.GrowAndShrink
+            let index = ref 0
+            let image = new PictureBox(Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.AutoSize, Image = images.[!index])
+            image.Click.Add(fun _ ->
+                incr index
+                if images.Length <= !index then index := 0
+                image.Image <- images.[!index])
+            form.Controls.Add image)
+        form.Show())
+    (grid :> ISupportInitialize).EndInit()
+    form.SuspendLayout()
+    form.Controls.Add grid
+    form.ResumeLayout false
+    form.PerformLayout()
     form.Closing.Add(fun e -> e.Cancel <- true; form.Hide())))
 
 type GradationLabel () =
@@ -692,6 +843,11 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
         let form = missionWindow.Force()
         form.Show()
         form.Activate())
+    let shiplist = new Button(Location = Point(1051, 588), Anchor = anchorTR, Text = "艦娘一覧")
+    shiplist.Click.Add(fun _ ->
+        let form = shipWindow.Force()
+        form.Show()
+        form.Activate())
 
     let panel = new Panel(Location = Point(0, 0), Size = Size(1200, 668), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right), MaximumSize = Size(1200, 10000))
     panel.SuspendLayout()
@@ -713,6 +869,7 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
     panel.Controls.Add capture
     panel.Controls.Add clear
     panel.Controls.Add mission
+    panel.Controls.Add shiplist
     panel.ResumeLayout false
     panel.PerformLayout()
     form.Controls.Add panel)
@@ -757,6 +914,7 @@ let afterSessionComplete (oSession : Session) =
         let updateShips key json =
             lock ships (fun () -> ships.Clear()
                                   get key json |> getArray |> Array.iter (fun ship -> let ship = getObject ship in ships.Add(getNumber ship.["api_id"], ship)))
+            Ship.UpdateShips()
             Mission.UpdateDecks()
         let mission key json =
             decks <- get key json
@@ -792,14 +950,20 @@ let afterSessionComplete (oSession : Session) =
                                                 ships.Remove shipid |> ignore
                                                 itemids)
             lock slotitems (fun () -> Array.iter (getNumber >> function -1.0 -> () | itemid -> slotitems.Remove itemid |> ignore) itemids)
+            Ship.UpdateShips()
 
         match oSession.PathAndQuery with
         | "/kcsapi/api_start2" ->
             let data = parseJson oSession |> get "api_data" |> getObject
-            let array = getArray data.["api_mst_ship"]
-            for item in array do
+            for item in getArray data.["api_mst_ship"] do
                 let item = getObject item
                 masterShips.Add(getNumber item.["api_id"], item)
+            for item in getArray data.["api_mst_shipgraph"] do
+                let item = getObject item
+                masterGraph.Add(getNumber item.["api_id"], item)
+            for item in getArray data.["api_mst_stype"] do
+                let item = getObject item
+                masterStypes.Add(getNumber item.["api_id"], item)
             getArray data.["api_mst_slotitem"] |> master masterSlotitems
             getArray data.["api_mst_mission"] |> master masterMissions
         | "/kcsapi/api_req_member/get_incentive" -> // 初回と再読み込み時も
@@ -856,6 +1020,7 @@ let afterSessionComplete (oSession : Session) =
             | false, _ -> ()
             | true, items -> lock slotitems (fun () -> getArray items |> Array.iter (fun item -> let item = getObject item in slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"])))
             lock ships (fun () -> ships.Add(getNumber data.["api_id"], getObject data.["api_ship"]))
+            Ship.UpdateShips()
             kdock data.["api_kdock"]
         | "/kcsapi/api_req_kousyou/destroyship" ->
             oSession.GetRequestBodyAsString() |> parseQuery |> get "api_ship_id" |> float |> destroyship
@@ -873,6 +1038,7 @@ let afterSessionComplete (oSession : Session) =
             request.["api_id_items"].Split ',' |> Array.iter (float >> destroyship)
             let data = parseJson oSession |> get "api_data" |> getObject
             lock ships (fun () -> ships.[float request.["api_id"]] <- getObject data.["api_ship"])
+            Ship.UpdateShips()
             mission "api_deck" data
         | "/kcsapi/api_req_hensei/change" ->
             let remove shipids index =
@@ -892,13 +1058,22 @@ let afterSessionComplete (oSession : Session) =
         | "/kcsapi/api_get_member/ship3" ->         // 装備変更後に取得している。
             let data = parseJson oSession |> get "api_data" |> getObject
             lock ships (fun () -> getArray data.["api_ship_data"] |> Array.iter (fun ship -> let ship = getObject ship in ships.[getNumber ship.["api_id"]] <- ship))
+            Ship.UpdateShips()
             mission "api_deck_data" data
         | "/kcsapi/api_req_nyukyo/start" ->         // 入渠命令
             let request = oSession.GetRequestBodyAsString() |> parseQuery
             if int request.["api_highspeed"] = 1 then
                 let ship = lock ships (fun () -> ships.[float request.["api_ship_id"]])
                 ship.["api_nowhp"] <- ship.["api_maxhp"]
-        | _ -> ()
+                Ship.UpdateShips()
+        | path ->
+            let m = Regex.Match(path, "^/kcs/resources/swf/ships/([^.]+\.swf)")
+            if m.Success then
+                use storage = IsolatedStorageFile.GetUserStoreForAssembly()
+                storage.CreateDirectory "ships"
+                use file = new IsolatedStorageFileStream(sprintf "ships/%s" m.Groups.[1].Value, FileMode.Create, storage)
+                oSession.utilDecodeResponse() |> ignore
+                file.Write(oSession.responseBodyBytes, 0, oSession.responseBodyBytes.Length)
     with e -> Debug.WriteLine e
 #endif
 
