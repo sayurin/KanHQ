@@ -111,14 +111,14 @@ type private IHTMLObjectElement =
 type private DWebBrowserEvents2 =
     [<DispId(273)>] abstract member NewWindow3 : [<In; Out; MarshalAs(UnmanagedType.IDispatch)>] ppDisp : obj byref * [<In; Out; MarshalAs(UnmanagedType.VariantBool)>] Cancel : bool byref * dwFlags : uint32 * bstrUrlContext : string * bstrUrl : string -> unit
 
-[<StructLayout(LayoutKind.Sequential, Pack = 4)>]
+[<StructLayout(LayoutKind.Sequential, Pack = 4); AllowNullLiteral>]
 type DVTARGETDEVICE =
-    val tdSize : uint32
+    val tdSize : int
     val tdDriverNameOffset : uint16
     val tdDeviceNameOffset : uint16
     val tdPortNameOffset : uint16
     val tdExtDevmodeOffset : uint16
-    new () = { tdSize = 0u; tdDriverNameOffset = 0us; tdDeviceNameOffset = 0us; tdPortNameOffset = 0us; tdExtDevmodeOffset = 0us; }
+    new () = { tdSize = Marshal.SizeOf typeof<DVTARGETDEVICE>; tdDriverNameOffset = 0us; tdDeviceNameOffset = 0us; tdPortNameOffset = 0us; tdExtDevmodeOffset = 0us; }
 
 [<StructLayout(LayoutKind.Sequential, Pack = 4); AllowNullLiteral>]
 type RECT =
@@ -274,8 +274,10 @@ type WebBrowser2 () as self =
                    | :? IHTMLObjectElement as objectElement -> objectElement.``object`` :?> IViewObject
                    | :? IHTMLEmbedElement -> element :?> IViewObject
                    | _ -> failwith "unknown element"
+        let ptd = DVTARGETDEVICE()
+        let bounds = RECT(0, 0, size.Width, size.Height)
         let capture hdc =
-            view.Draw((*DVASPECT_CONTENT*)1, 0, 0n, DVTARGETDEVICE(), 0n, hdc, RECT(0, 0, size.Width, size.Height), null, 0n, 0n)
+            view.Draw((*DVASPECT_CONTENT*)1, 0, 0n, ptd, 0n, hdc, bounds, null, 0n, 0n)
         size, capture
     static member GetElementById((document : obj), id) =
         let element = (document :?> IHTMLDocument3).getElementById id

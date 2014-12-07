@@ -1,6 +1,6 @@
 ﻿艦これ 司令部室
-Version 0.7.0
-2014/06/14
+Version 0.8.0.0
+2014/12/07
 
 このソフトは艦これ専用ブラウザーです。
 
@@ -8,8 +8,11 @@ Version 0.7.0
 IEコンポーネントを使用しています。そのため、IE向けFlash Playerをインストールする必要があります。
 エラーが発生した場合、デスクトップにKanHQ.txtというファイル名で情報を書き出します。この内容を
 教えてもらえたら原因究明がはかどります。
+欲
+しい物リストを公開しています。応援してもらえるといろいろはかどります。
+<http://www.amazon.co.jp/registry/wishlist/9QZQ2PEKD8KB/>
 
 艦これ 司令部室向け
-  Fiddlerを使用しています。（http://fiddler2.com/）
+  Fiddlerを使用しています。 <http://www.telerik.com/fiddler>
 艦これ 司令部室Light向け
-  VisualPharmのアイコンを使用しています。（http://www.visualpharm.com/）
+  VisualPharmのアイコンを使用しています。 <http://www.visualpharm.com/>

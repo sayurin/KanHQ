@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.7.0.0"; AssemblyVersion "0.7.0.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.0.0"; AssemblyVersion "0.8.0.0">]
 #endif
 do
     let values = [|
@@ -83,6 +83,8 @@ do
     Application.SetUnhandledExceptionMode UnhandledExceptionMode.ThrowException
     Application.EnableVisualStyles()
     Application.SetCompatibleTextRenderingDefault false
+
+let captureSupported = Capture.test ()
 
 #if UNUSED
 let parseHttpDate (time : string) =
@@ -279,7 +281,7 @@ let configCapture () =
         form.Controls.Add videoCodec
         form.Controls.Add <| new Label(Location = Point(15, 112), AutoSize = true, Text = "フレームレート:")
         let videoFrameRate = new NumericUpDown(Location = Point(96, 110), Size = Size(46, 19), TextAlign = HorizontalAlignment.Right,
-                                               Minimum = 1m, Maximum = 60m, Value = decimal Settings.Default.FrameRate)
+                                               Minimum = 0m, Maximum = 60m, Value = decimal Settings.Default.FrameRate)
         form.Controls.Add videoFrameRate
         form.Controls.Add <| new Label(Location = Point(254, 87), AutoSize = true, Text = "音声コーデック:")
         let audioCodec = new ComboBox(Location = Point(347, 84), Size = Size(121, 20), DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = "Item1", BindingContext = BindingContext())
@@ -365,6 +367,7 @@ let slotitems = Dictionary()
 
 // 一括更新される。lock不要。
 let mutable decks = [||]
+let mutable dockShips = Array.empty
 
 [<AttributeUsage(AttributeTargets.Property)>]
 type SortAttribute (name) =
@@ -385,17 +388,13 @@ type SortableBindingList<'T> private (items : IList<_>) =
     member this.OnListChanged() =
         this.OnListChanged(ListChangedEventArgs(ListChangedType.Reset, -1))
     override this.ApplySortCore(property, direction) =
-        let get = match Seq.cast<Attribute> property.Attributes |> Seq.tryPick (function :? SortAttribute as sort -> Some(typeof<'T>.GetProperty sort.Name) | _ -> None) with
-                  | Some prop -> fun item -> prop.GetValue(item, null) :?> IComparable
-                  | None      -> fun item -> property.GetValue item :?> IComparable
-
-        // use Seq.sortBy, this is stable sort. TODO: reverse is not stable.
-        let sorted = Seq.sortBy get items |> Array.ofSeq
-        if direction = ListSortDirection.Ascending then
-            Array.iteri (fun i item -> items.[i] <- item) sorted
-        else
-            let length = sorted.Length - 1
-            Array.iteri (fun i item -> items.[length - i] <- item) sorted
+        let propertyInfo = if property.Attributes.Count = 0 then None
+                           else Seq.cast<Attribute> property.Attributes |> Seq.tryPick (function :? SortAttribute as sort -> Some sort.Name | _ -> None)
+                        |> function Some name -> name | None -> property.Name
+                        |> typeof<'T>.GetProperty
+        match items with :? array<'T> as array -> array | _ -> Array.ofSeq items
+        |> Array.stableSortByWithReverse (fun item -> propertyInfo.GetValue(item, null) :?> IComparable) (direction <> ListSortDirection.Ascending)
+        |> Array.iteri (fun i item -> items.[i] <- item)
         isSorted <- true
         propertyDescriptor <- property
         listSortDirection <- direction
@@ -455,7 +454,7 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
         Mission(36, "水上機基地建設",        540, 30,   0, [[16];         [16];         [3];          [2];     [];      [] ], 0, 0, 100, 480,   0, 200, 200, 8, 8)
         Mission(37, "東京急行",              165, 50, 200, [[3];          [2];          [2];          [2];     [2];     [2]], 4, 4,  65,   0, 380, 270,   0, 8, 8)
         Mission(38, "東京急行(弐)",          175, 65, 240, [[2];          [2];          [2];          [2];     [2];     [] ], 4, 8,  70, 420,   0, 200,   0, 8, 8)
-        Mission(39, "遠洋潜水艦作戦",       1800,  3, 180, [[20];         [13;14];      [13;14];      [13;14]; [13;14];    ], 0, 0,  -1,   0,   0, 300,   0, 9, 9)
+        Mission(39, "遠洋潜水艦作戦",       1800,  3, 180, [[20];         [13;14];      [13;14];      [13;14]; [13;14];    ], 0, 0, 160,   0,   0, 300,   0, 9, 9)
     |]
     static let bindingList = SortableBindingList missions
     static let mutable bindedForm = null
@@ -574,33 +573,66 @@ let missionWindow = lazy(createForm 829 809 "艦これ 司令部室 - 遠征計�
     form.Controls.Add grid
     form.Closing.Add(fun e -> e.Cancel <- true; form.Hide())))
 
-type Ship (id : float) =
-    static let bindingList = SortableBindingList<Ship>(RaiseListChangedEvents = false)
+type MasterShip (masterid, masterShip : IDictionary<_, _>) =
+    static let bindingList = SortableBindingList<MasterShip>(RaiseListChangedEvents = false)
     static let mutable bindedForm = null
+    let stype = masterStypes.[getNumber masterShip.["api_stype"]]
+    new (masterid) = MasterShip(masterid, masterShips.[masterid])
+
     static member GetBindingList (form : Form) =
         bindedForm <- form
         bindingList
     static member UpdateShips () =
+        if 0 < bindingList.Count then () else
+        Seq.sortBy (fun (KeyValue(id, _)) -> id) masterShips |> Seq.iter (fun (KeyValue(id, ship)) -> MasterShip(id, ship) |> bindingList.Add)
+        if bindedForm <> null then bindedForm.BeginInvoke(MethodInvoker bindingList.OnListChanged) |> ignore
+    member val ShipId = getNumber masterShip.["api_id"]
+    member val NameSortNo = getNumber masterShip.["api_sortno"] |> int
+    [<Sort "NameSortNo">]
+    member val Name = getString masterShip.["api_name"]
+    member val StypeSortNo = get "api_sortno" stype |> getNumber |> int
+    [<Sort "StypeSortNo">]
+    member val Stype = getString stype.["api_name"]
+    member val Fuel = getNumber masterShip.["api_fuel_max"] |> int
+    member val Bull = getNumber masterShip.["api_bull_max"] |> int
+
+type Ship (id : float, masterid) =
+    inherit MasterShip (masterid)
+
+    static let bindingList = SortableBindingList<Ship>(RaiseListChangedEvents = false)
+    static let mutable bindedForm = null
+    static let mutable missionShips = [||]
+    static let mutable repairShips = [||]
+    static member GetBindingList (form : Form) =
+        bindedForm <- form
+        bindingList
+    static member UpdateShips () =
+        missionShips <- decks
+                     |> Array.filter (fun deck -> 0.0 < getNumber (getArray deck.["api_mission"]).[1])
+                     |> Array.collect (fun deck -> getArray deck.["api_ship"])
+                     |> Array.map getNumber
         let ids = Dictionary()
         bindingList |> Seq.iteri (fun i item -> ids.Add(item.Index, i) |> ignore)
-        lock ships (fun () -> ships |> Seq.iter (fun pair -> let id = pair.Key
-                                                             let ship = match ids.TryGetValue id with
-                                                                        | true, i  -> ids.Remove id |> ignore
-                                                                                      bindingList.[i]
-                                                                        | false, _ -> let ship = Ship id
-                                                                                      bindingList.Add ship
-                                                                                      ship
-                                                             ship.Update pair.Value))
+        let repairitems = lock slotitems (fun () -> Seq.choose (fun (KeyValue(id, itemid)) -> if itemid = 86.0 then Some id else None) slotitems |> Array.ofSeq)
+        lock ships (fun () ->
+            repairShips <- decks
+                        |> Array.map (fun deck -> getArray deck.["api_ship"] |> Array.map getNumber)
+                        |> Array.choose (fun decks -> let flagship = decks.[0]
+                                                      if flagship < 1.0 then None else
+                                                      let flagship = ships.[flagship]
+                                                      if getNumber flagship.["api_ship_id"] <> 187.0 then None else
+                                                      let len = 2 + (getArray flagship.["api_slot"] |> Array.filter (fun id -> let id = getNumber id in Array.exists ((=) id) repairitems) |> Array.length)
+                                                      Some (if decks.Length <= len then decks else decks.[.. len - 1]))
+                        |> Array.concat
+            Seq.iter (fun (KeyValue(id, data)) -> match ids.TryGetValue id with
+                                                  | true, i  -> ids.Remove id |> ignore
+                                                                bindingList.[i].Update data
+                                                  | false, _ -> let ship = Ship(id, get "api_ship_id" data |> getNumber)
+                                                                ship.Update data
+                                                                bindingList.Add ship) ships)
         ids |> Seq.map (fun pair -> pair.Value) |> Seq.sortBy (~-) |> Seq.iter (fun i -> bindingList.RemoveAt i)
         if bindedForm <> null then bindedForm.BeginInvoke(MethodInvoker bindingList.OnListChanged) |> ignore
     member this.Index = id
-    member val ShipId = 0.0 with get, set
-    member val NameSortNo = 0 with get, set
-    [<Sort "NameSortNo">]
-    member val Name = "" with get, set
-    member val StypeSortNo = 0 with get, set
-    [<Sort "StypeSortNo">]
-    member val Stype = "" with get, set
     member val Level = 0 with get, set
     member val Exp = 0 with get, set
     member val Condition = 0 with get, set
@@ -618,19 +650,13 @@ type Ship (id : float) =
     member val NdockTimeSpan = TimeSpan.Zero with get, set
     [<Sort "NdockTimeSpan">]
     member val NdockTime = "-" with get, set
+    member val State = "" with get, set
     member this.Update ship =
-        let shipId = get "api_ship_id" ship |> getNumber
-        this.ShipId <- shipId
-        let masterShip = masterShips.[shipId]
-        this.NameSortNo <- getNumber masterShip.["api_sortno"] |> int
-        this.Name <- getString masterShip.["api_name"]
-        let stype = masterStypes.[getNumber masterShip.["api_stype"]]
-        this.StypeSortNo <- get "api_sortno" stype |> getNumber |> int
-        this.Stype <- getString stype.["api_name"]
         this.Level <- getNumber ship.["api_lv"] |> int
         this.Exp <- match ship.["api_exp"] with JsonArray array -> getNumber array.[2] |> int | _ -> 0
         this.Condition <- getNumber ship.["api_cond"] |> int
-        this.Hp <- getNumber ship.["api_nowhp"]
+        let nowhp = getNumber ship.["api_nowhp"]
+        this.Hp <- nowhp
         this.Karyoku <- getNumber (getArray ship.["api_karyoku"]).[0] |> int
         this.Taiku <- getNumber (getArray ship.["api_taiku"]).[0] |> int
         this.Raisou <- getNumber (getArray ship.["api_raisou"]).[0] |> int
@@ -644,8 +670,17 @@ type Ship (id : float) =
         this.NdockTime <- if ndock = TimeSpan.Zero    then "-"
                           elif ndock.TotalHours < 1.0 then sprintf "%d:%02d" (int ndock.TotalMinutes) ndock.Seconds
                                                       else sprintf "%d:%02d:%02d" (int ndock.TotalHours) ndock.Minutes ndock.Seconds
+        this.State <- let id = getNumber ship.["api_id"]
+                      if Array.exists ((=) id) missionShips then "遠征中" else
+                      if Array.exists ((=) id) dockShips then "入渠" else
+                      let hp  = nowhp / getNumber ship.["api_maxhp"]
+                      if 0.50 < hp && hp < 1.00 && Array.exists ((=) id) repairShips then "泊地修理" else
+                      if   hp <= 0.25 then "大破"
+                      elif hp <= 0.50 then "中破"
+                      elif hp <= 0.75 then "小破"
+                      else ""
 
-let shipWindow = lazy(createForm 820 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
+let shipWindow = lazy(createForm 880 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
     let grid = new DataGridView(Dock = DockStyle.Fill,
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false)
     (grid :> ISupportInitialize).BeginInit()
@@ -653,7 +688,7 @@ let shipWindow = lazy(createForm 820 664 "艦これ 司令部室 - 艦娘一覧"
     grid.ColumnHeadersDefaultCellStyle.WrapMode <- DataGridViewTriState.False
     let left = DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleLeft)
     grid.Columns.AddRange [|
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Index",        HeaderText = "New")                           :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Index",        HeaderText = "New")                           :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 30, DataPropertyName = "ShipId",       HeaderText = "ID")                            :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Stype",        HeaderText = "艦種", DefaultCellStyle = left) :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Name",         HeaderText = "艦名", DefaultCellStyle = left) :> DataGridViewColumn
@@ -670,24 +705,27 @@ let shipWindow = lazy(createForm 820 664 "艦これ 司令部室 - 艦娘一覧"
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Sakuteki",     HeaderText = "索敵")                          :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Lucky",        HeaderText = "運")                            :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 60, DataPropertyName = "NdockTime",    HeaderText = "修理時間")                      :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 60, DataPropertyName = "State",        HeaderText = "状態", DefaultCellStyle = left) :> DataGridViewColumn
     |]
     let bindingList = Ship.GetBindingList form
     grid.DataSource <- bindingList
     grid.CellDoubleClick.Add(fun c ->
-        use storage = IsolatedStorageFile.GetUserStoreForAssembly()
+        if c.RowIndex = -1 then () else
         let ship = bindingList.[c.RowIndex]
-        let map = masterShips |> Seq.choose (fun pair -> match getString pair.Value.["api_aftershipid"] with "0" -> None | afterid -> Some (float afterid, pair.Key)) |> dict
-        let images = Some ship.ShipId
-                  |> Seq.unfold (Option.map (fun id -> get "api_filename" masterGraph.[id] |> getString, match map.TryGetValue id with true, id -> Some id | false, _ -> None))
-                  |> Seq.distinct
-                  |> Seq.map (fun name -> try
-                                              use file = new IsolatedStorageFileStream(sprintf "ships/%s.swf" name, FileMode.Open, storage)
-                                              SwfParser.parse file |> List.choose (fun image -> match image.CharacterID with
-                                                                                                | 17 | 19 -> use stream = new MemoryStream(image.Bytes)
-                                                                                                             Some (new Bitmap(stream))
-                                                                                                | _ -> None)
-                                          with :? IOException -> [])
-                  |> List.concat
+        let images =
+            use storage = IsolatedStorageFile.GetUserStoreForAssembly()
+            let map = masterShips |> Seq.choose (fun pair -> match getString pair.Value.["api_aftershipid"] with "0" -> None | afterid -> Some (float afterid, pair.Key)) |> dict
+            Some ship.ShipId
+            |> Seq.unfold (Option.map (fun id -> get "api_filename" masterGraph.[id] |> getString, match map.TryGetValue id with true, id -> Some id | false, _ -> None))
+            |> Seq.distinct
+            |> Seq.map (fun name -> try
+                                        use file = new IsolatedStorageFileStream(sprintf "ships/%s.swf" name, FileMode.Open, storage)
+                                        let swflist = SwfParser.parse file
+                                        swflist |> List.filter (fun image -> match image.CharacterID with 17 | 19 -> true | _ -> false)
+                                                |> function [] -> swflist |> List.filter (fun image -> image.CharacterID = 3) | swflist -> swflist
+                                                |> List.map (fun image -> use stream = new MemoryStream(image.Bytes) in new Bitmap(stream))
+                                    with :? IOException -> [])
+            |> List.concat
         if images.Length = 0 then () else
         let form = createForm 1 1 (sprintf "艦これ 司令部室 - %s" ship.Name) (fun form ->
             form.AutoSize <- true
@@ -732,7 +770,6 @@ let mutable quests       = [|None|]
 let mutable missionTimes = Array.empty
 let mutable dockTimes    = Array.empty
 let mutable kousyouTimes = Array.empty
-let mutable dockShips = Array.empty
 let mutable maxCount = 0, 0
 
 [<DllImport("User32.dll")>]
@@ -810,7 +847,7 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
     let tweet = new Button(Location = Point(1051, 532), Anchor = anchorTR, Text = "呟く")
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
 
-    let capture = new Button(Location = Point(970, 560), Anchor = anchorTR, Text = "動画保存", Enabled = Capture.test())
+    let capture = new Button(Location = Point(970, 560), Anchor = anchorTR, Text = "動画保存", Enabled = captureSupported)
     capture.Click
         |> Observable.scan (fun state _ ->
             match state with
@@ -821,12 +858,10 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
                     let folder = if Directory.Exists folder then folder else Environment.ExpandEnvironmentVariables @"%USERPROFILE%\Videos"     // .NET 4 has Environment.SpecialFolder.MyVideos
                     let folder = if Directory.Exists folder then folder else "."
                     capture.Text <- "保存停止"
-                    let stop = new ManualResetEvent(false)
-                    Capture.start (folder, size, save, form, stop) |> Async.Start
-                    Some stop)
+                    Capture.start (folder, size, save))
             | Some stop ->
                 capture.Text <- "動画保存"
-                stop.Set() |> ignore
+                stop ()
                 None) None
         |> Observable.add ignore
 
@@ -966,6 +1001,7 @@ let afterSessionComplete (oSession : Session) =
                 masterStypes.Add(getNumber item.["api_id"], item)
             getArray data.["api_mst_slotitem"] |> master masterSlotitems
             getArray data.["api_mst_mission"] |> master masterMissions
+            MasterShip.UpdateShips()
         | "/kcsapi/api_req_member/get_incentive" -> // 初回と再読み込み時も
             quests <- [| None |]
         | "/kcsapi/api_get_member/basic" ->         // 起動時とあと時々

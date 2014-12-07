@@ -1,0 +1,21 @@
+LIBRARY
+EXPORTS
+D3DPERF_BeginEvent							@20
+D3DPERF_EndEvent							@21
+D3DPERF_GetStatus							@22
+D3DPERF_QueryRepeatFrame					@23
+D3DPERF_SetMarker							@24
+D3DPERF_SetOptions							@25
+D3DPERF_SetRegion							@26
+DebugSetLevel								@27
+DebugSetMute								@28
+Direct3D9EnableMaximizedWindowedModeShim	@29
+Direct3DCreate9								@30
+Direct3DCreate9Ex							@31
+Direct3DShaderValidatorCreate9				@17
+PSGPError									@18
+PSGPSampleTexture							@19
+Direct3D9ForceHybridEnumeration				@16 NONAME
+GetParameter
+Start
+Stop
