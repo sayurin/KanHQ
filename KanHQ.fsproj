@@ -57,7 +57,19 @@
     </Otherwise>
   </Choose>
   <Import Project="$(FSharpTargetsPath)" />
+  <Target Name="BeforeBuild">
+    <MSBuild Projects="@(D3d9)" Targets="Build" />
+  </Target>
+  <Target Name="BeforeClean">
+    <MSBuild Projects="@(D3d9)" Targets="Clean" />
+  </Target>
   <ItemGroup>
+    <D3d9 Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
+      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x64\;Platform=x64</Properties>
+    </D3d9>
+    <D3d9 Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
+      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x86\;Platform=Win32</Properties>
+    </D3d9>
     <Compile Include="Local.fs" />
     <Compile Include="Settings.fs" />
     <Compile Include="TextBox2.fs" />
@@ -97,11 +109,4 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
-       Other similar extension points exist, see Microsoft.Common.targets.
-  <Target Name="BeforeBuild">
-  </Target>
-  <Target Name="AfterBuild">
-  </Target>
-  -->
 </Project>

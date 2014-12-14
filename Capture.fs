@@ -190,7 +190,8 @@ type private IAudioClient =
 
 [<ComImport; Guid "C8ADBD64-E71E-48a0-A4DE-185C395CD317"; InterfaceType(ComInterfaceType.InterfaceIsIUnknown)>]
 type private IAudioCaptureClient =
-    abstract member GetBuffer : [<Out>] ppData : nativeint byref * [<Out>] pNumFramesToRead : uint32 byref * [<Out>] pdwFlags : uint32 byref * [<Out>] pu64DevicePosition : uint64 byref * [<Out>] pu64QPCPosition : uint64 byref -> unit
+    [<PreserveSig>]
+    abstract member GetBuffer : [<Out>] ppData : nativeint byref * [<Out>] pNumFramesToRead : uint32 byref * [<Out>] pdwFlags : uint32 byref * [<Out>] pu64DevicePosition : uint64 byref * [<Out>] pu64QPCPosition : uint64 byref -> uint32
     abstract member ReleaseBuffer : NumFramesRead : uint32 -> unit
     abstract member GetNextPacketSize : [<Out>] pNumFramesInNextPacket : uint32 byref -> unit
 
@@ -690,8 +691,8 @@ let configList () =
         let audio = MFT_REGISTER_TYPE_INFO(MFMediaType_Audio, audio) |> encoders MFT_CATEGORY_AUDIO_ENCODER
         key, (video, audio) |]
 
-let start (folder, size : Size, save) =
-    let result = ref None
+let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventWaitHandle) =
+    let result = ref false
     async{
         let extension, videoFormat, audioFormat =
             match Settings.Default.Extension.ToLowerInvariant() |> table.TryGetValue with
@@ -701,7 +702,6 @@ let start (folder, size : Size, save) =
         use _ = resource (fun () -> MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)) MFShutdown
         use _ = new MFTransformClassFactory(MFMediaType_Video, videoFormat, Settings.Default.VideoCodec)
         use _ = new MFTransformClassFactory(MFMediaType_Audio, audioFormat, Settings.Default.AudioCodec)
-        use finalized = new AutoResetEvent(false)
         let sinkWriter =
             let filename = Path.Combine(folder, String.Format("艦これ-{0:yyyyMMdd-HHmmss}.{1}", DateTime.Now, extension))
             let mutable attribute = null
@@ -709,10 +709,15 @@ let start (folder, size : Size, save) =
             attribute.SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1u)
             attribute.SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, 1u)
             attribute.SetUnknown(MF_SINK_WRITER_ASYNC_CALLBACK, { new IMFSinkWriterCallback with member __.OnMarker(dwStreamIndex, pvContext) = ()
-                                                                                                 member __.OnFinalize(hrStatus) = finalized.Set() |> ignore })
+                                                                                                 member __.OnFinalize(hrStatus) = completed.Set() |> ignore })
             let mutable sinkWriter = null
             MFCreateSinkWriterFromURL(filename, 0n, attribute, &sinkWriter)
             sinkWriter
+
+        let createMediaType () =
+            let mutable mediaType = null
+            MFCreateMediaType(&mediaType)
+            mediaType
 
         let createSample sampleTime =
             let mutable sample = null
@@ -731,8 +736,7 @@ let start (folder, size : Size, save) =
             sample.AddBuffer(buffer)
 
         let initializeVideo width height fps =
-            let mutable mediaType = null
-            MFCreateMediaType(&mediaType)
+            let mediaType = createMediaType ()
             mediaType.SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)
             mediaType.SetGUID(MF_MT_SUBTYPE, videoFormat)
             MFSetAttributeSize(mediaType, MF_MT_FRAME_SIZE, width, height)
@@ -743,8 +747,7 @@ let start (folder, size : Size, save) =
                 mediaType.SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Main)
                 //mediaType.SetUINT32(MF_MT_MPEG2_LEVEL, eAVEncH264VLevel3)
             let videoIndex = sinkWriter.AddStream(mediaType)
-            let mutable mediaType = null
-            MFCreateMediaType(&mediaType)
+            let mediaType = createMediaType ()
             mediaType.SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)
             mediaType.SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)
             MFSetAttributeSize(mediaType, MF_MT_FRAME_SIZE, width, height)
@@ -775,85 +778,86 @@ let start (folder, size : Size, save) =
                 else
                     loop (i + 1u)
             let audioIndex = sinkWriter.AddStream(loop 0u)
-            let mutable mediaType = null
-            MFCreateMediaType(&mediaType)
+            let mediaType = createMediaType ()
             MFInitMediaTypeFromWaveFormatEx(mediaType, pwfx, uint32 sizeof<WAVEFORMATEX> + uint32 wfx.cbSize)
             sinkWriter.SetInputMediaType(audioIndex, mediaType, null)
             audioClient.Initialize((*AUDCLNT_SHAREMODE_SHARED*)0, (AUDCLNT_STREAMFLAGS_NOPERSIST ||| AUDCLNT_STREAMFLAGS_LOOPBACK), TimeSpan.TicksPerSecond, 0L, pwfx, NativePtr.ofNativeInt 0n)
             let frameSize = uint32 wfx.wBitsPerSample / 8u * uint32 wfx.nChannels
-            let audioDuration = int (TimeSpan.FromSeconds(float (audioClient.GetBufferSize()) / float wfx.nSamplesPerSec).TotalMilliseconds) / 2
             let captureClient = audioClient.GetService(typeof<IAudioCaptureClient>.GUID) :?> IAudioCaptureClient
-            let totalFrames = ref 0L
-            let captureAudio () =
-                let mutable size = captureClient.GetNextPacketSize()
-                if 0u < size then
-                    let audioSample = !totalFrames * TimeSpan.TicksPerSecond / int64 wfx.nSamplesPerSec |> createSample 
-                    while 0u < size do
-                        let captureData, framesAvailable, _, _, _ = captureClient.GetBuffer()
-                        let bufferSize = framesAvailable * frameSize
-                        addBuffer audioSample bufferSize (fun address ->
-                            MFCopyImage(address, bufferSize, captureData, bufferSize, bufferSize, 1u))
-                        captureClient.ReleaseBuffer(framesAvailable)
-                        totalFrames := !totalFrames + int64 framesAvailable
-                        size <- captureClient.GetNextPacketSize()
+            let captureAudio videoTimestamp =
+                let mutable data, frames, flags, devicePosition, audioTimestamp = 0n, 0u, 0u, 0uL, 0uL
+                captureClient.GetBuffer(&data, &frames, &flags, &devicePosition, &audioTimestamp) |> ignore
+                while 0u < frames && int64 audioTimestamp < videoTimestamp do
+                    captureClient.ReleaseBuffer(frames)
+                    captureClient.GetBuffer(&data, &frames, &flags, &devicePosition, &audioTimestamp) |> ignore
+                if 0u < frames then
+                    let audioSample = int64 audioTimestamp - videoTimestamp |> createSample 
+                    while 0u < frames do
+                        let bufferSize = frames * frameSize
+                        do
+                            let data = data
+                            addBuffer audioSample bufferSize (fun address ->
+                                MFCopyImage(address, bufferSize, data, bufferSize, bufferSize, 1u))
+                        captureClient.ReleaseBuffer(frames)
+                        captureClient.GetBuffer(&data, &frames) |> ignore
                     sinkWriter.WriteSample(audioIndex, audioSample)
             audioClient, captureAudio
 
-        use videoStopped = new AutoResetEvent(false)
-        if Settings.Default.FrameRate = 0 then
-            // use Direct3D
-            let mutable width = 0u
-            let mutable height = 0u
-            let mutable format = D3DFORMAT.UNKNOWN
-            let mutable fps = 0u
-            GetParameter(&width, &height, &format, &fps)
-            let width, height = width, height
-            let videoIndex = initializeVideo width height fps
-            let audioClient, captureAudio = initializeAudio ()
+        let startTimestamp = ref 0L
+        let audioClient, captureAudio = initializeAudio ()
+        let videoStart, videoStop =
+            if Settings.Default.FrameRate = 0 then
+                // use Direct3D
+                let mutable width, height, format, fps = 0u, 0u, D3DFORMAT.UNKNOWN, 0u
+                GetParameter(&width, &height, &format, &fps)
+                let width, height = width, height
+                let videoIndex = initializeVideo width height fps
+                let callback = Callback(fun timestamp obj ->
+                    if !startTimestamp = 0L then startTimestamp := timestamp
+                    let videoSample = timestamp - !startTimestamp |> createSample
+                    let mutable buffer = null
+                    MFCreateDXSurfaceBuffer(IID_IDirect3DSurface9, obj, false, &buffer)
+                    buffer.SetCurrentLength(width * height * 4u)
+                    videoSample.AddBuffer(buffer)
+                    sinkWriter.WriteSample(videoIndex, videoSample)
+                    captureAudio !startTimestamp)
+                let handle = GCHandle.Alloc callback
+                (fun () -> Start callback), (fun () -> Stop(); handle.Free())
+            else
+                // use GDI
+                //
+                // from Ks.h
+                // Performs a x*y/z operation on 64 bit quantities by splitting the operation. The equation
+                // is simplified with respect to adding in the remainder for the upper 32 bits.
+                //
+                // (xh * 10000000 / Frequency) * 2^32 + ((((xh * 10000000) % Frequency) * 2^32 + (xl * 10000000)) / Frequency)
+                //
+                let hns x =
+                    let xh, xl = x >>> 32, uint32 x |> int64
+                    (xh * TimeSpan.TicksPerSecond / Stopwatch.Frequency <<< 32) + ((xh * TimeSpan.TicksPerSecond % Stopwatch.Frequency <<< 32) + xl * TimeSpan.TicksPerSecond) / Stopwatch.Frequency
+                let width = uint32 size.Width
+                let height = uint32 size.Height
+                let videoIndex = initializeVideo width height (uint32 Settings.Default.FrameRate)
+                let videoTimer = new Timer(Interval = 1000 / Settings.Default.FrameRate)
+                videoTimer.Tick.Add(fun _ ->
+                    let timestamp = Stopwatch.GetTimestamp() |> hns
+                    if !startTimestamp = 0L then startTimestamp := timestamp
+                    let videoSample = timestamp - !startTimestamp |> createSample
+                    addBuffer videoSample (width * height * 4u) (fun address ->
+                        use bitmap = new Bitmap(size.Width, size.Height, size.Width * 4, PixelFormat.Format32bppRgb, address)
+                        use graphics = Graphics.FromImage bitmap
+                        graphics.GetHdc() |> save
+                        graphics.ReleaseHdc())
+                    sinkWriter.WriteSample(videoIndex, videoSample)
+                    captureAudio !startTimestamp)
+                videoTimer.Start, videoTimer.Dispose
+
+        if true then    // create scope like 'do'
             use _ = resource sinkWriter.BeginWriting sinkWriter.Finalize
             use _ = resource audioClient.Start audioClient.Stop
-            let startTimestamp = ref 0L
-            let lastTimestamp = ref 0L
-            let callback = Callback(fun timestamp obj ->
-                if !startTimestamp = 0L then startTimestamp := timestamp
-                lastTimestamp := timestamp
-                let videoSample = createSample (timestamp - !startTimestamp)
-                let mutable buffer = null
-                MFCreateDXSurfaceBuffer(IID_IDirect3DSurface9, obj, false, &buffer)
-                buffer.SetCurrentLength(width * height * 4u)
-                videoSample.AddBuffer(buffer)
-                sinkWriter.WriteSample(videoIndex, videoSample)
-                captureAudio ())
-            use _ = resource (fun () -> GCHandle.Alloc callback) (fun handle -> handle.Free())
-            Start callback
-            result := Some (fun () -> Stop()
-                                      videoStopped.Set() |> ignore)
-            do! Async.AwaitWaitHandle videoStopped |> Async.Ignore
-        else
-            // use GDI
-            let width = uint32 size.Width
-            let height = uint32 size.Height
-            let videoIndex = initializeVideo width height (uint32 Settings.Default.FrameRate)
-            let audioClient, captureAudio = initializeAudio ()
-            use _ = resource sinkWriter.BeginWriting sinkWriter.Finalize
-            use _ = resource audioClient.Start audioClient.Stop
-            let startTimestamp = ref 0L
-            let lastTimestamp = ref 0L
-            use videoTimer = new Timer(Interval = 1000 / Settings.Default.FrameRate, Enabled = true)
-            videoTimer.Tick.Add(fun _ ->
-                lastTimestamp := Stopwatch.GetTimestamp()
-                if !startTimestamp = 0L then startTimestamp := !lastTimestamp
-                let videoSample = (!lastTimestamp - !startTimestamp) * TimeSpan.TicksPerSecond / Stopwatch.Frequency |> createSample
-                addBuffer videoSample (width * height * 4u) (fun address ->
-                    use bitmap = new Bitmap(size.Width, size.Height, size.Width * 4, PixelFormat.Format32bppRgb, address)
-                    use graphics = Graphics.FromImage bitmap
-                    graphics.GetHdc() |> save
-                    graphics.ReleaseHdc())
-                sinkWriter.WriteSample(videoIndex, videoSample)
-                captureAudio ())
-            result := Some (fun () -> videoTimer.Stop()
-                                      videoStopped.Set() |> ignore)
-            do! Async.AwaitWaitHandle videoStopped |> Async.Ignore
-        do! Async.AwaitWaitHandle finalized |> Async.Ignore
+            use _ = resource videoStart videoStop
+            result := true
+            do! Async.AwaitWaitHandle stop |> Async.Ignore
+        do! Async.AwaitWaitHandle completed |> Async.Ignore
     } |> Async.StartImmediate
     !result

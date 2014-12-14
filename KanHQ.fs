@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.0.0"; AssemblyVersion "0.8.0.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.0.1"; AssemblyVersion "0.8.0.1">]
 #endif
 do
     let values = [|
@@ -858,10 +858,19 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
                     let folder = if Directory.Exists folder then folder else Environment.ExpandEnvironmentVariables @"%USERPROFILE%\Videos"     // .NET 4 has Environment.SpecialFolder.MyVideos
                     let folder = if Directory.Exists folder then folder else "."
                     capture.Text <- "保存停止"
-                    Capture.start (folder, size, save))
-            | Some stop ->
-                capture.Text <- "動画保存"
-                stop ()
+                    let stop = new ManualResetEvent(false)
+                    let completed = new ManualResetEvent(false)
+                    if Capture.start folder size save stop completed then Some (stop, completed) else None)
+            | Some (stop, completed) ->
+                async{
+                    use _ = completed
+                    use _ = stop
+                    capture.Text <- "動画保存"
+                    capture.Enabled <- false
+                    stop.Set() |> ignore
+                    do! Async.AwaitWaitHandle completed |> Async.Ignore
+                    capture.Enabled <- true
+                } |> Async.StartImmediate
                 None) None
         |> Observable.add ignore
 

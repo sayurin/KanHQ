@@ -21,11 +21,8 @@ Global
 		{8987BD19-CC77-4959-A4E3-203714C613D5}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
 		{8987BD19-CC77-4959-A4E3-203714C613D5}.Release|Mixed Platforms.Build.0 = Release|Any CPU
 		{B805E2F6-08A9-4985-9626-65D812C6E52A}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
-		{B805E2F6-08A9-4985-9626-65D812C6E52A}.Debug|Mixed Platforms.Build.0 = Debug|Win32
 		{B805E2F6-08A9-4985-9626-65D812C6E52A}.LightRelease|Mixed Platforms.ActiveCfg = Release|Win32
-		{B805E2F6-08A9-4985-9626-65D812C6E52A}.LightRelease|Mixed Platforms.Build.0 = Release|Win32
 		{B805E2F6-08A9-4985-9626-65D812C6E52A}.Release|Mixed Platforms.ActiveCfg = Release|Win32
-		{B805E2F6-08A9-4985-9626-65D812C6E52A}.Release|Mixed Platforms.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
