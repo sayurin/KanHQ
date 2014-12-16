@@ -79,14 +79,19 @@ namespace {
 	}
 	#define PROC(NAME) proc<decltype(NAME)>(#NAME)
 
-	template<typename Interface>
-	void writable(Interface* ptr) {
+	template<typename Fn>
+	void update(Fn*& target, Fn*& backup, Fn* hook) {
+		if (target == backup)
+			return;
+		_ASSERTE(!backup);
 		MEMORY_BASIC_INFORMATION info;
-		auto size = VirtualQuery(ptr->lpVtbl, &info, sizeof MEMORY_BASIC_INFORMATION);
+		auto size = VirtualQuery(&target, &info, sizeof MEMORY_BASIC_INFORMATION);
 		_ASSERTE(0 < size);
 		auto protect = info.Protect & ~0xFF | (info.Protect & 0x0F ? PAGE_READWRITE : PAGE_EXECUTE_READWRITE);
-		auto result = VirtualProtect(info.AllocationBase, info.RegionSize, protect, &protect);
+		auto result = VirtualProtect(&target, sizeof(Fn*), protect, &protect);
 		_ASSERTE(result);
+		backup = target;
+		target = hook;
 	}
 
 	void (STDMETHODCALLTYPE *Frame)(ULONGLONG, IDirect3DSurface9*) = nullptr;
@@ -134,28 +139,16 @@ namespace {
 	decltype(vtable_t<IDirect3D9>::CreateDevice) createDevice = nullptr;
 	HRESULT STDMETHODCALLTYPE CreateDevice(IDirect3D9* This, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice9** ppReturnedDeviceInterface) {
 		auto result = createDevice(This, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
-		if (result == S_OK) {
-			auto pDevice = *ppReturnedDeviceInterface;
-			writable(pDevice);
-			if (!endScene) {
-				endScene = pDevice->lpVtbl->EndScene;
-				pDevice->lpVtbl->EndScene = EndScene;
-			}
-		}
+		if (result == S_OK)
+			update((*ppReturnedDeviceInterface)->lpVtbl->EndScene, endScene, EndScene);
 		return result;
 	}
 
 	decltype(vtable_t<IDirect3D9Ex>::CreateDeviceEx) createDeviceEx = nullptr;
 	HRESULT STDMETHODCALLTYPE CreateDeviceEx(IDirect3D9Ex* This, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode, IDirect3DDevice9Ex** ppReturnedDeviceInterface) {
 		auto result = createDeviceEx(This, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, pFullscreenDisplayMode, ppReturnedDeviceInterface);
-		if (result == S_OK) {
-			auto pDevice = reinterpret_cast<IDirect3DDevice9*>(*ppReturnedDeviceInterface);
-			writable(pDevice);
-			if (!endScene) {
-				endScene = pDevice->lpVtbl->EndScene;
-				pDevice->lpVtbl->EndScene = EndScene;
-			}
-		}
+		if (result == S_OK)
+			update(reinterpret_cast<IDirect3DDevice9*>(*ppReturnedDeviceInterface)->lpVtbl->EndScene, endScene, EndScene);
 		return result;
 	};
 }
@@ -225,13 +218,8 @@ extern "C"{
 		if (!func)
 			return nullptr;
 		auto pD3D = func(SDKVersion);
-		if (pD3D) {
-			writable(pD3D);
-			if (!createDevice) {
-				createDevice = pD3D->lpVtbl->CreateDevice;
-				pD3D->lpVtbl->CreateDevice = CreateDevice;
-			}
-		}
+		if (pD3D)
+			update(pD3D->lpVtbl->CreateDevice, createDevice, CreateDevice);
 		return pD3D;
 	}
 	HRESULT WINAPI Direct3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** ppD3D) {
@@ -241,16 +229,8 @@ extern "C"{
 		auto result = func(SDKVersion, ppD3D);
 		if (result == S_OK) {
 			auto pD3DEx = *ppD3D;
-			writable(pD3DEx);
-			auto pD3D = reinterpret_cast<IDirect3D9*>(pD3DEx);
-			if (!createDevice) {
-				createDevice = pD3D->lpVtbl->CreateDevice;
-				pD3D->lpVtbl->CreateDevice = CreateDevice;
-			}
-			if (!createDeviceEx) {
-				createDeviceEx = pD3DEx->lpVtbl->CreateDeviceEx;
-				pD3DEx->lpVtbl->CreateDeviceEx = CreateDeviceEx;
-			}
+			update(reinterpret_cast<IDirect3D9*>(pD3DEx)->lpVtbl->CreateDevice, createDevice, CreateDevice);
+			update(pD3DEx->lpVtbl->CreateDeviceEx, createDeviceEx, CreateDeviceEx);
 		}
 		return result;
 	}

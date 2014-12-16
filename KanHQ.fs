@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.0.1"; AssemblyVersion "0.8.0.1">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.1.0"; AssemblyVersion "0.8.1.0">]
 #endif
 do
     let values = [|
@@ -829,7 +829,7 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
 
     let webBrowser = new WebBrowser2(Location = Point(0, 0), Size = Size(960, 668), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right),
                                      ScriptErrorsSuppressed = true, Url = Uri "http://www.dmm.com/netgame/social/-/gadgets/=/app_id=854854/")
-    let mute       = new CheckBox(Location = Point(970, 508), Anchor = anchorTR, Text = "消音", UseVisualStyleBackColor = true)
+    let mute       = new MuteCheckBox(Location = Point(970, 508), Anchor = anchorTR, Text = "消音", UseVisualStyleBackColor = true)
     let screenShot = new Button(Location = Point(970, 532), Anchor = anchorTR, Text = "画像保存")
     let resize _ =
         100 * webBrowser.Width / 960 |> zoom webBrowser
@@ -842,7 +842,6 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
             form.Controls.Add webBrowser
             e.ppDisp <- webBrowser.GetApplication())
         form.Show())
-    mute.CheckedChanged.Add(fun _ -> Sayuri.Mixer.mute mute.Checked)
     screenShot.Click.Add(fun _ -> saveImage webBrowser)
     let tweet = new Button(Location = Point(1051, 532), Anchor = anchorTR, Text = "呟く")
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
