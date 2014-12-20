@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.1.0"; AssemblyVersion "0.8.1.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.2.0"; AssemblyVersion "0.8.2.0">]
 #endif
 do
     let values = [|
@@ -724,7 +724,7 @@ let shipWindow = lazy(createForm 880 664 "艦これ 司令部室 - 艦娘一覧"
                                         swflist |> List.filter (fun image -> match image.CharacterID with 17 | 19 -> true | _ -> false)
                                                 |> function [] -> swflist |> List.filter (fun image -> image.CharacterID = 3) | swflist -> swflist
                                                 |> List.map (fun image -> use stream = new MemoryStream(image.Bytes) in new Bitmap(stream))
-                                    with :? IOException -> [])
+                                    with :? IOException | :? InvalidOperationException -> [])
             |> List.concat
         if images.Length = 0 then () else
         let form = createForm 1 1 (sprintf "艦これ 司令部室 - %s" ship.Name) (fun form ->
