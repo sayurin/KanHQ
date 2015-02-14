@@ -77,6 +77,11 @@ type private IHTMLElement =
     [<DispId((*DISPID_IHTMLELEMENT_OFFSETHEIGHT*)0x800103F3)>]
     abstract member offsetHeight : (*long*)int
 
+[<ComImport; Guid("332c4427-26cb-11d0-b483-00c04fd90119"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
+type private IHTMLWindow2 =
+    [<DispId((*DISPID_IHTMLWINDOW2_SCROLLTO*)1168)>]
+    abstract member scrollTo : x : int * y : int -> unit
+
 [<ComImport; Guid("3050f2e3-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
 type private IHTMLStyleSheet =
     [<DispId((*DISPID_IHTMLSTYLESHEET_CSSTEXT*)1014)>]
@@ -84,6 +89,8 @@ type private IHTMLStyleSheet =
 
 [<ComImport; Guid("332c4425-26cb-11d0-b483-00c04fd90119"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
 type private IHTMLDocument2 =
+    [<DispId((*DISPID_IHTMLDOCUMENT2_PARENTWINDOW*)1034)>]
+    abstract member parentWindow : IHTMLWindow2
     [<DispId((*DISPID_IHTMLDOCUMENT2_CREATESTYLESHEET*)1071)>]
     abstract member createStyleSheet : bstrHref : string * lIndex : int -> IHTMLStyleSheet
 
@@ -95,7 +102,7 @@ type private IHTMLDocument3 =
 [<ComImport; Guid("3050f6db-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
 type private IHTMLFrameBase2 =
     [<DispId((*DISPID_IHTMLFRAMEBASE2_CONTENTWINDOW*)0x80010BC1)>]
-    abstract member contentWindow : (*IHTMLWindow2*)obj
+    abstract member contentWindow : IHTMLWindow2
 
 [<ComImport; Guid("3050f25f-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
 type private IHTMLEmbedElement =
@@ -259,10 +266,12 @@ type WebBrowser2 () as self =
         // another approach, .NET4's ICustomQueryInterface.GetInterface()
         //   http://stackoverflow.com/questions/15515581/why-my-implementation-of-idochostuihandler-is-ignored
         self.Navigate "about:blank"
-        DocHostUIHandler self |> (self.Document.DomDocument :?> ICustomDoc).SetUIHandler
+        DocHostUIHandler self |> (self.DomDocument :?> ICustomDoc).SetUIHandler
 
+    member this.DomDocument : obj =
+        (this.ActiveXInstance :?> IWebBrowser2).Document
     member this.AddStyleSheet(cssText) =
-        (this.Document.DomDocument :?> IHTMLDocument2).createStyleSheet("", -1).cssText <- cssText
+        (this.DomDocument :?> IHTMLDocument2).createStyleSheet("", -1).cssText <- cssText
     member this.GetApplication() =
         let wb = this.ActiveXInstance :?> IWebBrowser2
         wb.RegisterAsBrowser <- true
@@ -287,6 +296,7 @@ type WebBrowser2 () as self =
     member this.Zoom(percent : int) =
         let mutable old = null
         (this.ActiveXInstance :?> IWebBrowser2).ExecWB((*OLECMDID_OPTICAL_ZOOM*)63, (*OLECMDEXECOPT_DODEFAULT*)0, percent :> obj |> ref, &old)
+        (this.DomDocument :?> IHTMLDocument2).parentWindow.scrollTo(0, 0)
         old :?> int
         
     [<CLIEvent>]

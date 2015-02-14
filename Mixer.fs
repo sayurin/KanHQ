@@ -103,9 +103,14 @@ module NativeMethods =
 
 open NativeMethods
 
-type MuteCheckBox () as self =
-    inherit CheckBox (AutoCheck = false)
+type CheckEventArgs (checked_) =
+    inherit EventArgs ()
+    member __.Checked = checked_
+
+type Mute (control : Control) =
     let mutable state = None
+    let mutable checkedValue = false
+    let checkedEvent = Event<_>()
 
     let close () =
         Option.iter (fst >> mixerClose >> ignore) state
@@ -114,7 +119,7 @@ type MuteCheckBox () as self =
     let reopen () =
         close ()
         let mutable hmx = 0n
-        let result = mixerOpen(&hmx, 0, self.Handle, 0n, (*CALLBACK_WINDOW*)0x00010000l)
+        let result = mixerOpen(&hmx, 0, control.Handle, 0n, (*CALLBACK_WINDOW*)0x00010000l)
         if result <> 0 then Debug.WriteLine(sprintf "mixerOpen() failed: %d" result) else
         let mutable mxl = MIXERLINE((*MIXERLINE_COMPONENTTYPE_SRC_WAVEOUT*)0x00001008)
         let result = mixerGetLineInfo(hmx, &mxl, (*MIXER_GETLINEINFOF_COMPONENTTYPE*)0x00000003)
@@ -137,31 +142,56 @@ type MuteCheckBox () as self =
                 Debug.WriteLine(sprintf "mixerGetControlDetails() failed: %d" result)
                 reopen ()
             else
-                self.Checked <- NativePtr.read ptr <> 0
+                if checkedValue <> (NativePtr.read ptr <> 0) then
+                    checkedValue <- not checkedValue
+                    CheckEventArgs checkedValue |> checkedEvent.Trigger
         ) state
 
-    override this.OnHandleCreated(e) =
-        reopen ()
-        updateState ()
+    do
+        control.HandleCreated.Add(fun _ ->
+            reopen ()
+            updateState ()
+        )
+        control.HandleDestroyed.Add(fun _ ->
+            close ()
+        )
+        control.Click.Add(fun _ ->
+            if state = None then reopen ()
+            Option.iter (fun (hmx, controlId) ->
+                let ptr = NativePtr.stackalloc 1
+                NativePtr.write ptr (if not checkedValue then 1 else 0)
+                let mxcd = MIXERCONTROLDETAILS(controlId, sizeof<int>, NativePtr.toNativeInt ptr)
+                let result = mixerSetControlDetails(hmx, mxcd, (*MIXER_SETCONTROLDETAILSF_VALUE*)0x00000000)
+                if result <> 0 then
+                    Debug.WriteLine(sprintf "mixerSetControlDetails() failed: %d" result)
+                    reopen ()
+            ) state
+        )
 
-    override __.Dispose(disposing) =
-        close ()
-        base.Dispose disposing
-
-    override this.OnClick(e) =
-        if state = None then reopen ()
-        Option.iter (fun (hmx, controlId) ->
-            let ptr = NativePtr.stackalloc 1
-            NativePtr.write ptr (if not this.Checked then 1 else 0)
-            let mxcd = MIXERCONTROLDETAILS(controlId, sizeof<int>, NativePtr.toNativeInt ptr)
-            let result = mixerSetControlDetails(hmx, mxcd, (*MIXER_SETCONTROLDETAILSF_VALUE*)0x00000000)
-            if result <> 0 then
-                Debug.WriteLine(sprintf "mixerSetControlDetails() failed: %d" result)
-                reopen ()
-        ) state
-
-    override __.WndProc(m) =
+    member __.WndProc(m : Message) =
         match m.Msg with
-        | (*MM_MIXM_LINE_CHANGE   *)0x3D0 -> ()
-        | (*MM_MIXM_CONTROL_CHANGE*)0x3D1 -> let m = m in Option.iter (fun (hmx, controlId) -> if m.WParam = hmx && m.LParam = nativeint controlId then updateState ()) state
-        | _                               -> base.WndProc(&m)
+        | (*MM_MIXM_LINE_CHANGE   *)0x3D0 -> true
+        | (*MM_MIXM_CONTROL_CHANGE*)0x3D1 -> Option.iter (fun (hmx, controlId) -> if m.WParam = hmx && m.LParam = nativeint controlId then updateState ()) state; true
+        | _                               -> false
+
+    [<CLIEvent>]
+    member __.CheckedEvent = checkedEvent.Publish
+
+#if LIGHT
+type MuteButton (normalImage, muteImage) as self =
+    inherit Button ()
+    let mute = Mute self
+    do
+        self.Image <- normalImage
+        mute.CheckedEvent.Add(fun e -> self.Image <-if e.Checked then muteImage else normalImage)
+    override __.WndProc(m) =
+        if mute.WndProc m |> not then base.WndProc(&m)
+#else
+type MuteCheckBox () as self =
+    inherit CheckBox (AutoCheck = false)
+    let mute = Mute self
+    do
+        mute.CheckedEvent.Add(fun e -> self.Checked <- e.Checked)
+    override __.WndProc(m) =
+        if mute.WndProc m |> not then base.WndProc(&m)
+#endif

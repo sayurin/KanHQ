@@ -23,9 +23,9 @@ open Sayuri.Windows.Forms
 
 [<assembly: AssemblyCompany "Haxe"; AssemblyProduct "KanHQ"; AssemblyCopyright "Copyright ©  2013-2015 はぇ～"; AssemblyKeyFile "KanHQ.snk">]
 #if LIGHT
-[<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.4.0"; AssemblyVersion "0.8.4.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #endif
 do
     let values = [|
@@ -69,7 +69,7 @@ do
     for subkey, value in values do
         use key = key.CreateSubKey subkey
         key.SetValue(name, value)
-    let dump e =
+    let dump (e : obj) =
         let path = Path.Combine(Environment.GetFolderPath Environment.SpecialFolder.DesktopDirectory, "KanHQ.txt")
         let name = Assembly.GetExecutingAssembly().GetName()
         let text = sprintf "----\r\n%O\r\n%s: %O\r\nWin: %O\r\n.NET: %O, %dbit\r\nIE: %O\r\nflash: %O\r\n%O\r\n"
@@ -82,7 +82,7 @@ do
                        e
         File.AppendAllText(path, text)
     AppDomain.CurrentDomain.UnhandledException.Add(fun e -> dump e.ExceptionObject)
-    Application.ThreadException.Add(fun e -> dump e; MessageBox.Show("エラーが発生しました。\r\nKanHQ.txtの内容を報告していただけたら幸いです。", "艦これ 司令部室") |> ignore)
+    Application.ThreadException.Add(fun e -> dump e.Exception; MessageBox.Show("エラーが発生しました。\r\nKanHQ.txtの内容を報告していただけたら幸いです。", "艦これ 司令部室") |> ignore)
     Application.EnableVisualStyles()
     Application.SetCompatibleTextRenderingDefault false
 
@@ -231,8 +231,8 @@ let tweetWindow (parent : Form) image =
         | None -> ()
     } |> Async.Start
 
-let getCapture (webBrowser : WebBrowser) =
-    WebBrowser2.GetElementById(webBrowser.Document.DomDocument, "game_frame")
+let getCapture (webBrowser : WebBrowser2) =
+    WebBrowser2.GetElementById(webBrowser.DomDocument, "game_frame")
     |> Option.bind (fun iframe -> WebBrowser2.GetElementById(WebBrowser2.GetFrameDocument iframe, "externalswf"))
     |> Option.map WebBrowser2.GetCapture
 
@@ -322,7 +322,6 @@ let zoom (webBrowser : WebBrowser2) (percent : int) =
     // モニタサイズが小さいと縮小され初期化中にResizeイベントが飛ぶ模様。その際、ExecWB()が失敗しCOMExceptionを引き起こす。
     try
         webBrowser.Zoom percent |> ignore
-        webBrowser.Document.Window.ScrollTo(0, 0)
     with :? COMException -> ()
 
 #if LIGHT
@@ -330,8 +329,8 @@ let mainWindow () = createForm 864 480 "艦これ 司令部室 Light" (fun form 
     let webBrowser = new WebBrowser2(Location = Point(0, 0), Size = Size(800, 480), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right),
                                      ScriptErrorsSuppressed = true, Url = Uri "http://www.dmm.com/netgame/social/-/gadgets/=/app_id=854854/")
     let assembly = Assembly.GetExecutingAssembly()
-    let muteIcon = new Bitmap(assembly.GetManifestResourceStream "Mute.png"), new Bitmap(assembly.GetManifestResourceStream "Volume.png")
-    let mute       = new Button(Location = Point(812,  12), Size = Size(40, 40), Anchor = anchorTR, UseVisualStyleBackColor = true, Image = snd muteIcon)
+    let muteImage, normalImage = new Bitmap(assembly.GetManifestResourceStream "Mute.png"), new Bitmap(assembly.GetManifestResourceStream "Volume.png")
+    let mute       = new MuteButton(normalImage, muteImage, Location = Point(812,  12), Size = Size(40, 40), Anchor = anchorTR, UseVisualStyleBackColor = true)
     let screenShot = new Button(Location = Point(812,  64), Size = Size(40, 40), Anchor = anchorTR, UseVisualStyleBackColor = true, Image = new Bitmap(assembly.GetManifestResourceStream "ScreenShot.png"))
     let tweet      = new Button(Location = Point(812, 116), Size = Size(40, 40), Anchor = anchorTR, UseVisualStyleBackColor = true, Image = new Bitmap(assembly.GetManifestResourceStream "Tweet.png"))
     let resize _ =
@@ -340,13 +339,9 @@ let mainWindow () = createForm 864 480 "艦これ 司令部室 Light" (fun form 
         min width height |> zoom webBrowser
     webBrowser.Resize.Add resize
     webBrowser.DocumentCompleted.Add(fun _ ->
-        if webBrowser.Document.GetElementById "game_frame" <> null then
-            webBrowser.AddStyleSheet "body{margin:0;overflow:hidden}#game_frame{position:fixed;left:50%;top:-16px;margin-left:-450px;z-index:1}"
+        WebBrowser2.GetElementById(webBrowser.DomDocument, "game_frame")
+        |> Option.iter (fun _ -> webBrowser.AddStyleSheet "body{margin:0;overflow:hidden}#game_frame{position:fixed;left:50%;top:-16px;margin-left:-450px;z-index:1}")
         resize ())
-    let isMute = ref false
-    mute.Click.Add(fun _ -> isMute := not !isMute
-                            Sayuri.Mixer.mute !isMute
-                            mute.Image <- (if !isMute then fst else snd) muteIcon)
     screenShot.Click.Add(fun _ -> saveImage webBrowser)
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
 
@@ -360,8 +355,9 @@ let mainWindow () = createForm 864 480 "艦これ 司令部室 Light" (fun form 
 let masterShips = Dictionary()
 let masterGraph = Dictionary()
 let masterStypes = Dictionary()
-let masterSlotitems = Dictionary()
+let masterSlotitems = Dictionary<_, IDictionary<_, _>>()
 let masterMissions = Dictionary()
+let masterSlotitemEquiptypes = Dictionary()
 
 // lock必要。
 let ships = Dictionary()
@@ -575,36 +571,8 @@ let missionWindow = lazy(createForm 829 809 "艦これ 司令部室 - 遠征計�
     form.Controls.Add grid
     form.Closing.Add(fun e -> e.Cancel <- true; form.Hide())))
 
-type MasterShip (masterid, masterShip : IDictionary<_, _>) =
-    static let bindingList = SortableBindingList<MasterShip>(RaiseListChangedEvents = false)
-    static let mutable bindedForm = null
-    let stype = masterStypes.[getNumber masterShip.["api_stype"]]
-    let afterlv = getNumber masterShip.["api_afterlv"] |> int
-    new (masterid) = MasterShip(masterid, masterShips.[masterid])
-
-    static member GetBindingList (form : Form) =
-        bindedForm <- form
-        bindingList
-    static member UpdateShips () =
-        if 0 < bindingList.Count then () else
-        Seq.sortBy (fun (KeyValue(id, _)) -> id) masterShips |> Seq.iter (fun (KeyValue(id, ship)) -> MasterShip(id, ship) |> bindingList.Add)
-        if bindedForm <> null then bindedForm.BeginInvoke(MethodInvoker bindingList.OnListChanged) |> ignore
-    member val ShipId = getNumber masterShip.["api_id"]
-    member val NameSortNo = getNumber masterShip.["api_sortno"] |> int
-    [<Sort "NameSortNo">]
-    member val Name = getString masterShip.["api_name"]
-    member val StypeSortNo = get "api_sortno" stype |> getNumber |> int
-    [<Sort "StypeSortNo">]
-    member val Stype = getString stype.["api_name"]
-    member val Fuel = getNumber masterShip.["api_fuel_max"] |> int
-    member val Bull = getNumber masterShip.["api_bull_max"] |> int
-    member this.AfterLvNo = afterlv
-    [<Sort "AfterLvNo">]
-    member val AfterLv = match afterlv with 0 -> "-" | _ -> string afterlv
-
-type Ship (id : float, masterid) =
-    inherit MasterShip (masterid)
-
+type Ship private (id : float) =
+    let mutable masterid = 0.0
     static let bindingList = SortableBindingList<Ship>(RaiseListChangedEvents = false)
     static let mutable bindedForm = null
     static let mutable missionShips = [||]
@@ -633,11 +601,25 @@ type Ship (id : float, masterid) =
             Seq.iter (fun (KeyValue(id, data)) -> match ids.TryGetValue id with
                                                   | true, i  -> ids.Remove id |> ignore
                                                                 bindingList.[i].Update data
-                                                  | false, _ -> let ship = Ship(id, get "api_ship_id" data |> getNumber)
+                                                  | false, _ -> let ship = Ship(id)
                                                                 ship.Update data
                                                                 bindingList.Add ship) ships)
-        ids |> Seq.map (fun pair -> pair.Value) |> Seq.sortBy (~-) |> Seq.iter (fun i -> bindingList.RemoveAt i)
+        Seq.sortBy (~-) ids.Values |> Seq.iter bindingList.RemoveAt
         if bindedForm <> null then bindedForm.BeginInvoke(MethodInvoker bindingList.OnListChanged) |> ignore
+
+    member val ShipId = 0.0 with get, set
+    member val NameSortNo = 0 with get, set
+    [<Sort "NameSortNo">]
+    member val Name = "" with get, set
+    member val StypeSortNo = 0 with get, set
+    [<Sort "StypeSortNo">]
+    member val Stype = "" with get, set
+    member val Fuel = 0 with get, set
+    member val Bull = 0 with get, set
+    member val AfterLvNo = 0 with get, set
+    [<Sort "AfterLvNo">]
+    member val AfterLv = "" with get, set
+
     member this.Index = id
     member val Level = 0 with get, set
     member val Exp = 0 with get, set
@@ -648,9 +630,7 @@ type Ship (id : float, masterid) =
     member val Raisou = 0 with get, set
     member val Soukou = 0 with get, set
     member val Kaihi = 0 with get, set
-    //member val Tousai = 0 with get, set
     member val Taisen = 0 with get, set
-    //member val Sokuryoku = 0 with get, set
     member val Sakuteki = 0 with get, set
     member val Lucky = 0 with get, set
     member val NdockTimeSpan = TimeSpan.Zero with get, set
@@ -658,6 +638,21 @@ type Ship (id : float, masterid) =
     member val NdockTime = "-" with get, set
     member val State = "" with get, set
     member this.Update ship =
+        let newMasterId = getNumber ship.["api_ship_id"]
+        if masterid <> newMasterId then
+            masterid <- newMasterId
+            let masterShip = masterShips.[masterid]
+            let stype = masterStypes.[getNumber masterShip.["api_stype"]]
+            let afterlv = getNumber masterShip.["api_afterlv"] |> int
+            this.ShipId <- getNumber masterShip.["api_id"]
+            this.NameSortNo <- getNumber masterShip.["api_sortno"] |> int
+            this.Name <- getString masterShip.["api_name"]
+            this.StypeSortNo <- get "api_sortno" stype |> getNumber |> int
+            this.Stype <- getString stype.["api_name"]
+            this.Fuel <- getNumber masterShip.["api_fuel_max"] |> int
+            this.Bull <- getNumber masterShip.["api_bull_max"] |> int
+            this.AfterLvNo <- afterlv
+            this.AfterLv <- match afterlv with 0 -> "-" | _ -> string afterlv
         this.Level <- getNumber ship.["api_lv"] |> int
         this.Exp <- match ship.["api_exp"] with JsonArray array -> getNumber array.[2] |> int | _ -> 0
         this.Condition <- getNumber ship.["api_cond"] |> int
@@ -686,14 +681,42 @@ type Ship (id : float, masterid) =
                       elif hp <= 0.75 then "小破"
                       else ""
 
+type Slotitem (id, masterid) =
+    let master = masterSlotitems.[masterid]
+    let equipType = getNumber (getArray master.["api_type"]).[2]
+    static let bindingList = SortableBindingList<Slotitem>(RaiseListChangedEvents = false)
+    static let mutable bindedForm = null
+    static member GetBindingList (form : Form) =
+        bindedForm <- form
+        bindingList
+    static member UpdateItems () =
+        let ids = Dictionary()
+        bindingList |> Seq.iteri (fun i item -> ids.Add(item.Index, i) |> ignore)
+        lock slotitems (fun () ->
+            Seq.iter (fun (KeyValue(id, masterid)) -> match ids.TryGetValue id with
+                                                      | true, i  -> ids.Remove id |> ignore
+                                                      | false, _ -> let slotitem = Slotitem(id, masterid)
+                                                                    bindingList.Add slotitem) slotitems)
+        Seq.sortBy (~-) ids.Values |> Seq.iter (fun i -> bindingList.RemoveAt i)
+        if bindedForm <> null then bindedForm.BeginInvoke(MethodInvoker bindingList.OnListChanged) |> ignore
+
+    member this.Index = id
+    member this.ItemId = masterid
+    member this.EquipTypeNo = equipType
+    [<Sort "EquipTypeNo">]
+    member val EquipType = masterSlotitemEquiptypes.[equipType] |> get "api_name" |> getString
+    member val NameSortNo = getNumber master.["api_sortno"] |> int
+    [<Sort "NameSortNo">]
+    member val Name = getString master.["api_name"]
+
 let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
-    let grid = new DataGridView(Dock = DockStyle.Fill,
+    let shipGrid = new DataGridView(Dock = DockStyle.Fill,
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false)
-    (grid :> ISupportInitialize).BeginInit()
-    grid.DefaultCellStyle <- DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleRight, WrapMode = DataGridViewTriState.False)
-    grid.ColumnHeadersDefaultCellStyle.WrapMode <- DataGridViewTriState.False
+    (shipGrid :> ISupportInitialize).BeginInit()
+    shipGrid.DefaultCellStyle <- DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleRight, WrapMode = DataGridViewTriState.False)
+    shipGrid.ColumnHeadersDefaultCellStyle.WrapMode <- DataGridViewTriState.False
     let left = DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleLeft)
-    grid.Columns.AddRange [|
+    shipGrid.Columns.AddRange [|
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Index",        HeaderText = "New")                           :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 30, DataPropertyName = "ShipId",       HeaderText = "ID")                            :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Stype",        HeaderText = "艦種", DefaultCellStyle = left) :> DataGridViewColumn
@@ -715,8 +738,8 @@ let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧"
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 60, DataPropertyName = "State",        HeaderText = "状態", DefaultCellStyle = left) :> DataGridViewColumn
     |]
     let bindingList = Ship.GetBindingList form
-    grid.DataSource <- bindingList
-    grid.CellDoubleClick.Add(fun c ->
+    shipGrid.DataSource <- bindingList
+    shipGrid.CellDoubleClick.Add(fun c ->
         if c.RowIndex = -1 then () else
         let ship = bindingList.[c.RowIndex]
         let images =
@@ -745,9 +768,36 @@ let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧"
                 image.Image <- images.[!index])
             form.Controls.Add image)
         form.Show())
-    (grid :> ISupportInitialize).EndInit()
+    (shipGrid :> ISupportInitialize).EndInit()
+    let slotitemGrid = new DataGridView(Dock = DockStyle.Fill,
+                                RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false)
+    (slotitemGrid :> ISupportInitialize).BeginInit()
+    slotitemGrid.DefaultCellStyle <- DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleRight, WrapMode = DataGridViewTriState.False)
+    slotitemGrid.ColumnHeadersDefaultCellStyle.WrapMode <- DataGridViewTriState.False
+    let left = DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleLeft)
+    slotitemGrid.Columns.AddRange [|
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Index",        HeaderText = "New")                             :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  30, DataPropertyName = "ItemId",       HeaderText = "ID")                              :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  90, DataPropertyName = "EquipType",    HeaderText = "種別", DefaultCellStyle = left)   :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 150, DataPropertyName = "Name",         HeaderText = "装備名", DefaultCellStyle = left) :> DataGridViewColumn
+    |]
+    let bindingList = Slotitem.GetBindingList form
+    slotitemGrid.DataSource <- bindingList
+    (slotitemGrid :> ISupportInitialize).EndInit()
+    let tab = new TabControl(Dock = DockStyle.Fill)
+    let page1 = new TabPage("艦娘一覧")
+    let page2 = new TabPage("装備一覧")
     form.SuspendLayout()
-    form.Controls.Add grid
+    tab.SuspendLayout()
+    page1.SuspendLayout()
+    page2.SuspendLayout()
+    page1.Controls.Add shipGrid
+    page2.Controls.Add slotitemGrid
+    tab.TabPages.AddRange [|page1;page2|]
+    form.Controls.Add tab
+    page2.ResumeLayout false
+    page1.ResumeLayout false
+    tab.ResumeLayout false
     form.ResumeLayout false
     form.PerformLayout()
     form.Closing.Add(fun e -> e.Cancel <- true; form.Hide())))
@@ -959,9 +1009,6 @@ let afterSessionComplete (oSession : Session) =
             let tick = getNumber json
             if tick = 0.0 then None else
             epoch + TimeSpan.FromMilliseconds tick |> Some
-        let master (dictionary : Dictionary<_, _>) array =
-            Array.iter (fun entry -> let entry = getObject entry
-                                     dictionary.[getNumber entry.["api_id"]] <- getString entry.["api_name"]) array
         let updateShips key json =
             lock ships (fun () -> ships.Clear()
                                   get key json |> getArray |> Array.iter (fun ship -> let ship = getObject ship in ships.Add(getNumber ship.["api_id"], ship)))
@@ -1002,22 +1049,23 @@ let afterSessionComplete (oSession : Session) =
                                                 itemids)
             lock slotitems (fun () -> Array.iter (getNumber >> function -1.0 -> () | itemid -> slotitems.Remove itemid |> ignore) itemids)
             Ship.UpdateShips()
+            Slotitem.UpdateItems()
 
         match oSession.PathAndQuery with
         | "/kcsapi/api_start2" ->
             let data = parseJson oSession |> get "api_data" |> getObject
-            for item in getArray data.["api_mst_ship"] do
+            let update (master : Dictionary<_, _>) key =
+                for item in getArray data.[key] do
+                    let item = getObject item
+                    master.[getNumber item.["api_id"]] <- item
+            update masterShips "api_mst_ship"
+            update masterGraph "api_mst_shipgraph"
+            update masterStypes "api_mst_stype"
+            update masterSlotitems "api_mst_slotitem"
+            update masterSlotitemEquiptypes "api_mst_slotitem_equiptype"
+            for item in getArray data.["api_mst_mission"] do
                 let item = getObject item
-                masterShips.Add(getNumber item.["api_id"], item)
-            for item in getArray data.["api_mst_shipgraph"] do
-                let item = getObject item
-                masterGraph.Add(getNumber item.["api_id"], item)
-            for item in getArray data.["api_mst_stype"] do
-                let item = getObject item
-                masterStypes.Add(getNumber item.["api_id"], item)
-            getArray data.["api_mst_slotitem"] |> master masterSlotitems
-            getArray data.["api_mst_mission"] |> master masterMissions
-            MasterShip.UpdateShips()
+                masterMissions.[getNumber item.["api_id"]] <- getString item.["api_name"]
         | "/kcsapi/api_req_member/get_incentive" -> // 初回と再読み込み時も
             quests <- [| None |]
         | "/kcsapi/api_get_member/basic" ->         // 起動時とあと時々
@@ -1026,6 +1074,7 @@ let afterSessionComplete (oSession : Session) =
             let items = parseJson oSession |> get "api_data" |> getArray |> Array.map getObject
             lock slotitems (fun () -> slotitems.Clear()
                                       items |> Array.iter (fun item -> slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"])))
+            Slotitem.UpdateItems()
         | "/kcsapi/api_get_member/questlist" ->     // 任務を操作後に最新情報を取得している。
             let data = parseJson oSession
                     |> get "api_data"
@@ -1071,6 +1120,7 @@ let afterSessionComplete (oSession : Session) =
             match data.TryGetValue "api_slotitem" with
             | false, _ -> ()
             | true, items -> lock slotitems (fun () -> getArray items |> Array.iter (fun item -> let item = getObject item in slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"])))
+                             Slotitem.UpdateItems()
             lock ships (fun () -> ships.Add(getNumber data.["api_id"], getObject data.["api_ship"]))
             Ship.UpdateShips()
             kdock data.["api_kdock"]
@@ -1081,10 +1131,13 @@ let afterSessionComplete (oSession : Session) =
             let data = parseJson oSession |> get "api_data" |> getObject
             match data.TryGetValue "api_slot_item" with
             | false, _ -> ()
-            | true, item -> let item = getObject item in lock slotitems (fun () -> slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"]))
+            | true, item -> let item = getObject item
+                            lock slotitems (fun () -> slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"]))
+                            Slotitem.UpdateItems()
         | "/kcsapi/api_req_kousyou/destroyitem2" ->
             let slotitemids = oSession.GetRequestBodyAsString() |> parseQuery |> get "api_slotitem_ids"
             lock slotitems (fun () -> slotitemids.Split ',' |> Array.iter (float >> slotitems.Remove >> ignore))
+            Slotitem.UpdateItems()
         | "/kcsapi/api_req_kaisou/powerup" ->
             let request = oSession.GetRequestBodyAsString() |> parseQuery
             request.["api_id_items"].Split ',' |> Array.iter (float >> destroyship)
