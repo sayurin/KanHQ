@@ -358,6 +358,7 @@ let masterStypes = Dictionary()
 let masterSlotitems = Dictionary<_, IDictionary<_, _>>()
 let masterMissions = Dictionary()
 let masterSlotitemEquiptypes = Dictionary()
+let masterSakuteki = Dictionary()
 
 // lock必要。
 let ships = Dictionary()
@@ -681,9 +682,19 @@ type Ship private (id : float) =
                       elif hp <= 0.75 then "小破"
                       else ""
 
-type Slotitem (id, masterid) =
+type Slotitem (masterid, count, shipNames) =
     let master = masterSlotitems.[masterid]
     let equipType = getNumber (getArray master.["api_type"]).[2]
+    let karyoku = getNumber master.["api_houg"] |> int
+    let taiku = getNumber master.["api_tyku"] |> int
+    let raisou = getNumber master.["api_raig"] |> int
+    let bakusou = getNumber master.["api_baku"] |> int
+    let soukou = getNumber master.["api_souk"] |> int
+    let kaihi = getNumber master.["api_houk"] |> int
+    let taisen = getNumber master.["api_tais"] |> int
+    let sakuteki = getNumber master.["api_saku"] |> int
+    let meichu = getNumber master.["api_houm"] |> int
+    static let toString no = if no = 0 then "" else sprintf "%+d" no
     static let bindingList = SortableBindingList<Slotitem>(RaiseListChangedEvents = false)
     static let mutable bindedForm = null
     static member GetBindingList (form : Form) =
@@ -691,23 +702,62 @@ type Slotitem (id, masterid) =
         bindingList
     static member UpdateItems () =
         let ids = Dictionary()
-        bindingList |> Seq.iteri (fun i item -> ids.Add(item.Index, i) |> ignore)
+        bindingList |> Seq.iteri (fun i item -> ids.Add(item.ItemId, i) |> ignore)
+        let itemShip = Dictionary()
+        lock ships (fun () -> ships.Values |> Seq.iter (fun ship -> let masterid = getNumber ship.["api_ship_id"]
+                                                                    let name = get "api_name" masterShips.[masterid] |> getString
+                                                                    getArray ship.["api_slot"] |> Array.iter (fun itemid -> let itemid = getNumber itemid
+                                                                                                                            if 0.0 < itemid then itemShip.Add(itemid, name))))
         lock slotitems (fun () ->
-            Seq.iter (fun (KeyValue(id, masterid)) -> match ids.TryGetValue id with
-                                                      | true, i  -> ids.Remove id |> ignore
-                                                      | false, _ -> let slotitem = Slotitem(id, masterid)
-                                                                    bindingList.Add slotitem) slotitems)
+            Seq.groupBy (fun (KeyValue(_, masterid)) -> masterid) slotitems
+            |> Seq.iter (fun (masterid, group) -> let count = Seq.length group
+                                                  let shipNames = Seq.choose (fun (KeyValue(id, _)) -> match itemShip.TryGetValue id with true, name -> Some name | false, _ -> None) group
+                                                               |> Seq.distinct
+                                                               |> String.concat " "
+                                                  match ids.TryGetValue masterid with
+                                                  | true, i -> ids.Remove masterid |> ignore
+                                                               bindingList.[i].Count <- count
+                                                               bindingList.[i].ShipNames <- shipNames
+                                                  | false, _ -> Slotitem(masterid, count, shipNames) |> bindingList.Add))
         Seq.sortBy (~-) ids.Values |> Seq.iter (fun i -> bindingList.RemoveAt i)
         if bindedForm <> null then bindedForm.BeginInvoke(MethodInvoker bindingList.OnListChanged) |> ignore
 
-    member this.Index = id
     member this.ItemId = masterid
     member this.EquipTypeNo = equipType
     [<Sort "EquipTypeNo">]
-    member val EquipType = masterSlotitemEquiptypes.[equipType] |> get "api_name" |> getString
+    member val EquipType = get "api_name" masterSlotitemEquiptypes.[equipType] |> getString
     member val NameSortNo = getNumber master.["api_sortno"] |> int
     [<Sort "NameSortNo">]
     member val Name = getString master.["api_name"]
+    member val Count = count with get, set
+    member val KaryokuNo = karyoku
+    [<Sort "KaryokuNo">]
+    member val Karyoku = toString karyoku
+    member val TaikuNo = taiku
+    [<Sort "TaikuNo">]
+    member val Taiku = toString taiku
+    member val RaisouNo = raisou
+    [<Sort "RaisouNo">]
+    member val Raisou = toString raisou
+    member val BakusouNo = bakusou
+    [<Sort "BakusouNo">]
+    member val Bakusou = toString bakusou
+    member val SoukouNo = soukou
+    [<Sort "SoukouNo">]
+    member val Soukou = toString soukou
+    member val KaihiNo = kaihi
+    [<Sort "KaihiNo">]
+    member val Kaihi = toString kaihi
+    member val TaisenNo = taisen
+    [<Sort "TaisenNo">]
+    member val Taisen = toString taisen
+    member val SakutekiNo = sakuteki
+    [<Sort "SakutekiNo">]
+    member val Sakuteki = toString sakuteki
+    member val MeichuNo = meichu
+    [<Sort "MeichuNo">]
+    member val Meichu = toString meichu
+    member val ShipNames = shipNames with get, set
 
 let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
     let shipGrid = new DataGridView(Dock = DockStyle.Fill,
@@ -776,10 +826,20 @@ let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧"
     slotitemGrid.ColumnHeadersDefaultCellStyle.WrapMode <- DataGridViewTriState.False
     let left = DataGridViewCellStyle(Alignment = DataGridViewContentAlignment.MiddleLeft)
     slotitemGrid.Columns.AddRange [|
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Index",        HeaderText = "New")                             :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width =  30, DataPropertyName = "ItemId",       HeaderText = "ID")                              :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width =  90, DataPropertyName = "EquipType",    HeaderText = "種別", DefaultCellStyle = left)   :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 150, DataPropertyName = "Name",         HeaderText = "装備名", DefaultCellStyle = left) :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Count",        HeaderText = "個数")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Karyoku",      HeaderText = "火力")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Taiku",        HeaderText = "対空")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Raisou",       HeaderText = "雷装")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Bakusou",      HeaderText = "爆装")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Soukou",       HeaderText = "装甲")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Taisen",       HeaderText = "対潜")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Sakuteki",     HeaderText = "索敵")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Meichu",       HeaderText = "命中")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width =  40, DataPropertyName = "Kaihi",        HeaderText = "回避")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 150, DataPropertyName = "ShipNames",    HeaderText = "装備艦", DefaultCellStyle = left) :> DataGridViewColumn
     |]
     let bindingList = Slotitem.GetBindingList form
     slotitemGrid.DataSource <- bindingList
@@ -828,6 +888,7 @@ let mutable missionTimes = Array.empty
 let mutable dockTimes    = Array.empty
 let mutable kousyouTimes = Array.empty
 let mutable maxCount = 0, 0
+let mutable hqLevel = 0
 
 [<DllImport("User32.dll")>]
 extern bool FlashWindow(nativeint hWnd, bool bInvert);
@@ -864,8 +925,19 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
                           sprintf "%02d:%02d:%02d %s" (int span.TotalHours) span.Minutes span.Seconds t))
         if !deckIndex < decks.Length && 0 < masterShips.Count then
             let deck = decks.[!deckIndex]
-            deckLabel.Text <- getString deck.["api_name"]
             let ships = lock ships (fun () -> getArray deck.["api_ship"] |> Array.choose (function JsonNumber shipid when shipid <> -1.0 -> Some (shipid, ships.[shipid]) | _ -> None))
+            let sakuteki, seikuu = lock slotitems (fun () ->
+                ships |> Array.map (fun (_, ship) -> let sakuteki, scaled, taiku = getArray ship.["api_slot"]
+                                                                                |> Array.map (getNumber >> slotitems.TryGetValue >> function true, masterid -> masterSakuteki.[masterid] | false, _ -> 0.0, 0.0, 0.0)
+                                                                                |> Array.unzip3
+                                                     let sakuteki = getNumber (getArray ship.["api_sakuteki"]).[0] - Array.sum sakuteki
+                                                     let sakuteki = Array.sum scaled + sqrt sakuteki * 1.69
+                                                     let seikuu = getArray ship.["api_onslot"] |> Array.zip taiku |> Array.sumBy (fun (taiku, count) -> let count = getNumber count in taiku * sqrt count |> int)
+                                                     sakuteki, seikuu)
+                      |> Array.unzip)
+            let sakuteki, seikuu = Array.sum sakuteki - 0.61 * float ((hqLevel + 4) / 5 * 5), Array.sum seikuu
+            let deckName = getString deck.["api_name"]
+            deckLabel.Text <- sprintf "%s (索 %0.1f, 制 %d)" deckName sakuteki seikuu
             shipLabels |> Array.iteri (fun i l ->
                 let name, cond = if ships.Length <= i then "", 49 else
                                  let shipid, ship = ships.[i]
@@ -1013,6 +1085,7 @@ let afterSessionComplete (oSession : Session) =
             lock ships (fun () -> ships.Clear()
                                   get key json |> getArray |> Array.iter (fun ship -> let ship = getObject ship in ships.Add(getNumber ship.["api_id"], ship)))
             Ship.UpdateShips()
+            Slotitem.UpdateItems()
             Mission.UpdateDecks()
         let mission key json =
             decks <- get key json
@@ -1027,6 +1100,7 @@ let afterSessionComplete (oSession : Session) =
         let basic data =
             let data = getObject data
             maxCount <- getNumber data.["api_max_chara"] |> int, (getNumber data.["api_max_slotitem"] |> int) + 3
+            hqLevel <- getNumber data.["api_level"] |> int
         let ndock data =
             let docks = getArray data |> Array.map (fun dock -> let dock = getObject dock
                                                                 toDateTime dock.["api_complete_time"] |> Option.map (fun dateTime -> dateTime, getNumber dock.["api_ship_id"]))
@@ -1063,6 +1137,27 @@ let afterSessionComplete (oSession : Session) =
             update masterStypes "api_mst_stype"
             update masterSlotitems "api_mst_slotitem"
             update masterSlotitemEquiptypes "api_mst_slotitem_equiptype"
+            for KeyValue(masterid, master) in masterSlotitems do
+                let sakuteki = getNumber master.["api_saku"]
+                let type_ = getNumber (getArray master.["api_type"]).[2]
+                let scale = match type_ with
+                            |  7.0 -> 1.04    // 艦上爆撃機
+                            |  8.0 -> 1.37    // 艦上攻撃機
+                            |  9.0 -> 1.66    // 艦上偵察機
+                            | 10.0 -> 2.00    // 水上偵察機
+                            | 11.0 -> 1.78    // 水上爆撃機
+                            | 12.0 -> 1.00    // 小型電探
+                            | 13.0 -> 0.99    // 大型電探
+                            | 29.0 -> 0.91    // 探照灯
+                            | _    -> 0.00
+                let taiku = match type_ with
+                            |  6.0  // 艦上戦闘機
+                            |  7.0  // 艦上爆撃機
+                            |  8.0  // 艦上攻撃機
+                            | 11.0  // 水上爆撃機
+                                -> getNumber master.["api_tyku"]
+                            | _ -> 0.0
+                masterSakuteki.[masterid] <- (sakuteki, sakuteki * scale, taiku)
             for item in getArray data.["api_mst_mission"] do
                 let item = getObject item
                 masterMissions.[getNumber item.["api_id"]] <- getString item.["api_name"]
@@ -1123,6 +1218,7 @@ let afterSessionComplete (oSession : Session) =
                              Slotitem.UpdateItems()
             lock ships (fun () -> ships.Add(getNumber data.["api_id"], getObject data.["api_ship"]))
             Ship.UpdateShips()
+            Slotitem.UpdateItems()
             kdock data.["api_kdock"]
         | "/kcsapi/api_req_kousyou/destroyship" ->
             oSession.GetRequestBodyAsString() |> parseQuery |> get "api_ship_id" |> float |> destroyship
@@ -1144,6 +1240,7 @@ let afterSessionComplete (oSession : Session) =
             let data = parseJson oSession |> get "api_data" |> getObject
             lock ships (fun () -> ships.[float request.["api_id"]] <- getObject data.["api_ship"])
             Ship.UpdateShips()
+            Slotitem.UpdateItems()
             mission "api_deck" data
         | "/kcsapi/api_req_hensei/change" ->
             let remove shipids index =
@@ -1164,6 +1261,7 @@ let afterSessionComplete (oSession : Session) =
             let data = parseJson oSession |> get "api_data" |> getObject
             lock ships (fun () -> getArray data.["api_ship_data"] |> Array.iter (fun ship -> let ship = getObject ship in ships.[getNumber ship.["api_id"]] <- ship))
             Ship.UpdateShips()
+            Slotitem.UpdateItems()
             mission "api_deck_data" data
         | "/kcsapi/api_req_nyukyo/start" ->         // 入渠命令
             let request = oSession.GetRequestBodyAsString() |> parseQuery
@@ -1171,6 +1269,7 @@ let afterSessionComplete (oSession : Session) =
                 let ship = lock ships (fun () -> ships.[float request.["api_ship_id"]])
                 ship.["api_nowhp"] <- ship.["api_maxhp"]
                 Ship.UpdateShips()
+                Slotitem.UpdateItems()
         | path ->
             let m = Regex.Match(path, "^/kcs/resources/swf/ships/([^.]+\.swf)")
             if m.Success then
