@@ -454,7 +454,7 @@ type IMFSinkWriterCallback =
     abstract member OnFinalize : hrStatus : int -> unit
     abstract member OnMarker : dwStreamIndex : uint32 * pvContext : nativeint -> unit
 
-[<Struct; StructLayout(LayoutKind.Sequential)>]
+[<StructLayout(LayoutKind.Sequential); AllowNullLiteral>]
 type MFT_REGISTER_TYPE_INFO =
     val guidMajorType : Guid
     val guidSubtype : Guid
@@ -479,11 +479,11 @@ extern void private MFCreateSample([<Out>] IMFSample& ppIMFSample);
 [<DllImport("Mfplat.dll", PreserveSig = false)>]
 extern void private MFInitMediaTypeFromWaveFormatEx(IMFMediaType pMFType, WAVEFORMATEX* pWaveFormat, uint32 cbBufSize);
 [<DllImport("Mfplat.dll", PreserveSig = false)>]
-extern void private MFTRegisterLocal(IClassFactory pClassFactory, [<MarshalAs(UnmanagedType.LPStruct)>] Guid guidCategory, string pszName, uint32 Flags, uint32 cInputTypes, MFT_REGISTER_TYPE_INFO* pInputTypes, uint32 cOutputTypes, MFT_REGISTER_TYPE_INFO* pOutputTypes);
+extern void private MFTRegisterLocal(IClassFactory pClassFactory, [<MarshalAs(UnmanagedType.LPStruct)>] Guid guidCategory, string pszName, uint32 Flags, uint32 cInputTypes, MFT_REGISTER_TYPE_INFO pInputTypes, uint32 cOutputTypes, MFT_REGISTER_TYPE_INFO pOutputTypes);
 [<DllImport("Mfplat.dll", PreserveSig = false)>]
 extern void private MFTUnregisterLocal(IClassFactory pClassFactory);
 [<DllImport("Mfplat.dll", PreserveSig = false)>]
-extern void private MFTEnumEx(Guid guidCategory, uint32 Flags, MFT_REGISTER_TYPE_INFO* pInputType, MFT_REGISTER_TYPE_INFO* pOutputType, [<Out; MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 5s)>] IMFActivate[]& pppMFTActivate, [<Out>] uint32& pcMFTActivate);
+extern void private MFTEnumEx(Guid guidCategory, uint32 Flags, MFT_REGISTER_TYPE_INFO pInputType, MFT_REGISTER_TYPE_INFO pOutputType, [<Out>] nativeint& pppMFTActivate, [<Out>] uint32& pcMFTActivate);
 
 [<DllImport("Mf.dll", PreserveSig = false)>]
 extern void private MFTranscodeGetAudioOutputAvailableTypes([<MarshalAs(UnmanagedType.LPStruct)>] Guid guidSubType, uint32 dwMFTFlags, IMFAttributes pCodecConfig, [<Out>] IMFCollection& ppAvailableTypes);
@@ -630,26 +630,30 @@ extern void private Stop();
 
 let table = dict [ "wmv", (MFVideoFormat_WMV3, MFAudioFormat_WMAudioV9); "mp4", (MFVideoFormat_H264, MFAudioFormat_AAC) ]
 
+let private enumMFT category outputType =
+    let mutable ppMFTActivate = 0n
+    let mutable cMFTActivate = 0u
+    try
+        MFTEnumEx(category, MFT_ENUM_FLAG_SYNCMFT ||| MFT_ENUM_FLAG_ASYNCMFT ||| MFT_ENUM_FLAG_HARDWARE ||| MFT_ENUM_FLAG_SORTANDFILTER, null, outputType, &ppMFTActivate, &cMFTActivate)
+        let ppMFTActivate = NativePtr.ofNativeInt ppMFTActivate
+        Array.init (int cMFTActivate) (fun i -> NativePtr.get ppMFTActivate i |> Marshal.GetObjectForIUnknown :?> IMFActivate)
+    finally
+        Marshal.FreeCoTaskMem ppMFTActivate
+
 type MFTransformClassFactory (majorType, subType, preferredCodec) as this =
     // see http://social.msdn.microsoft.com/Forums/en-us/6da521e9-7bb3-4b79-a2b6-b31509224638#5a7d3b0e-0505-4375-9969-66ef5021ec25
     let iuknown = Guid "00000000-0000-0000-c000-000000000046"
-    let outputType = Marshal.AllocCoTaskMem sizeof<MFT_REGISTER_TYPE_INFO> |> NativePtr.ofNativeInt<MFT_REGISTER_TYPE_INFO>
+    let outputType = MFT_REGISTER_TYPE_INFO(majorType, subType)
     do
-        MFT_REGISTER_TYPE_INFO(majorType, subType) |> NativePtr.write outputType
-        MFTRegisterLocal(this, MFT_CATEGORY_VIDEO_ENCODER, "KanHQ Class Factory", 0u, 0u, NativePtr.ofNativeInt 0n, 1u, outputType)
+        MFTRegisterLocal(this, MFT_CATEGORY_VIDEO_ENCODER, "KanHQ Class Factory", 0u, 0u, null, 1u, outputType)
     interface IClassFactory with
         member this.CreateInstance(pUnkOuter, riid, ppvObject) =
             if pUnkOuter <> null then invalidArg "pUnkOuter" "not null."
             if riid <> iuknown && riid <> typeof<IMFTransform>.GUID then invalidArg "riid" "not supportted."
-            let flags = MFT_ENUM_FLAG_SYNCMFT ||| MFT_ENUM_FLAG_ASYNCMFT ||| MFT_ENUM_FLAG_HARDWARE ||| MFT_ENUM_FLAG_SORTANDFILTER
-            let mutable ppMFTActivate = null
-            let mutable cMFTActivate = 0u
-            MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, flags, NativePtr.ofNativeInt 0n, outputType, &ppMFTActivate, &cMFTActivate)
-            if cMFTActivate = 0u then Marshal.ThrowExceptionForHR (*MF_E_TOPO_CODEC_NOT_FOUND*)0xC00D5212
-            let mutable activate = ppMFTActivate.[0]
-            for temp in ppMFTActivate.[1..] do
-                let clsid = temp.GetGUID(MFT_TRANSFORM_CLSID_Attribute)
-                if clsid.ToString() = preferredCodec then activate <- temp
+            let activates = enumMFT MFT_CATEGORY_VIDEO_ENCODER outputType
+            if activates.Length = 0 then Marshal.ThrowExceptionForHR (*MF_E_TOPO_CODEC_NOT_FOUND*)0xC00D5212
+            let activate = activates |> Array.tryFind (fun activete -> activete.GetGUID(MFT_TRANSFORM_CLSID_Attribute).ToString() = preferredCodec)
+            let activate = defaultArg activate activates.[0]
             let transform = activate.ActivateObject typeof<IMFTransform>.GUID :?> IMFTransform
 
             if subType = MFVideoFormat_WMV3 then
@@ -664,7 +668,6 @@ type MFTransformClassFactory (majorType, subType, preferredCodec) as this =
     interface IDisposable with
         member this.Dispose () =
             MFTUnregisterLocal this
-            NativePtr.toNativeInt outputType |> Marshal.FreeCoTaskMem
 
 let test () =
     let supported = Version(6, 1) <= Environment.OSVersion.Version
@@ -673,14 +676,8 @@ let test () =
 
 let configList () =
     use __ = resource (fun () -> MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)) MFShutdown
-    let outputTypePtr = NativePtr.stackalloc<MFT_REGISTER_TYPE_INFO> 1
     let encoders category outputType =
-        NativePtr.write outputTypePtr outputType
-        let flags = MFT_ENUM_FLAG_SYNCMFT ||| MFT_ENUM_FLAG_ASYNCMFT ||| MFT_ENUM_FLAG_HARDWARE ||| MFT_ENUM_FLAG_SORTANDFILTER
-        let mutable ppMFTActivate = null
-        let mutable cMFTActivate = 0u
-        MFTEnumEx(category, flags, NativePtr.ofNativeInt 0n, outputTypePtr, &ppMFTActivate, &cMFTActivate)
-        ppMFTActivate |> Array.map (fun activate ->
+        enumMFT category outputType |> Array.map (fun activate ->
             let friendlyNamePtr, _ = activate.GetAllocatedString(MFT_FRIENDLY_NAME_Attribute)
             let friendlyName = Marshal.PtrToStringUni friendlyNamePtr
             Marshal.FreeCoTaskMem friendlyNamePtr
@@ -692,7 +689,6 @@ let configList () =
         key, (video, audio) |]
 
 let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventWaitHandle) =
-    let result = ref false
     async{
         let extension, videoFormat, audioFormat =
             match Settings.Default.Extension.ToLowerInvariant() |> table.TryGetValue with
@@ -856,8 +852,6 @@ let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventW
             use _ = resource sinkWriter.BeginWriting sinkWriter.Finalize
             use _ = resource audioClient.Start audioClient.Stop
             use _ = resource videoStart videoStop
-            result := true
             do! Async.AwaitWaitHandle stop |> Async.Ignore
-        do! Async.AwaitWaitHandle completed |> Async.Ignore
+        return! Async.AwaitWaitHandle completed |> Async.Ignore
     } |> Async.StartImmediate
-    !result

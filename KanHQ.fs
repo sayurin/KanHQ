@@ -21,11 +21,11 @@ open Sayuri.FSharp.Local
 open Sayuri.JsonSerializer
 open Sayuri.Windows.Forms
 
-[<assembly: AssemblyCompany "Haxe"; AssemblyProduct "KanHQ"; AssemblyCopyright "Copyright ©  2013,2014 はぇ～"; AssemblyKeyFile "KanHQ.snk">]
+[<assembly: AssemblyCompany "Haxe"; AssemblyProduct "KanHQ"; AssemblyCopyright "Copyright ©  2013-2015 はぇ～"; AssemblyKeyFile "KanHQ.snk">]
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.2.0"; AssemblyVersion "0.8.2.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.3.0"; AssemblyVersion "0.8.3.0">]
 #endif
 do
     let values = [|
@@ -69,18 +69,20 @@ do
     for subkey, value in values do
         use key = key.CreateSubKey subkey
         key.SetValue(name, value)
-    AppDomain.CurrentDomain.UnhandledException.Add(fun e ->
+    let dump e =
         let path = Path.Combine(Environment.GetFolderPath Environment.SpecialFolder.DesktopDirectory, "KanHQ.txt")
         let name = Assembly.GetExecutingAssembly().GetName()
-        File.AppendAllText(path, sprintf "----\r\n%O\r\n%s: %O\r\nWin: %O\r\n.NET: %O, %dbit\r\nIE: %O\r\nflash: %O\r\n%O\r\n"
-            DateTime.Now
-            name.Name name.Version
-            Environment.OSVersion.Version
-            Environment.Version (IntPtr.Size * 8)
-            (Registry.GetValue("HKEY_LOCAL_MACHINE\Software\Microsoft\Internet Explorer", "Version", "unknown"))
-            (Registry.GetValue("HKEY_LOCAL_MACHINE\SOFTWARE\Macromedia\FlashPlayer", "CurrentVersion", "unknown"))
-            e.ExceptionObject))
-    Application.SetUnhandledExceptionMode UnhandledExceptionMode.ThrowException
+        let text = sprintf "----\r\n%O\r\n%s: %O\r\nWin: %O\r\n.NET: %O, %dbit\r\nIE: %O\r\nflash: %O\r\n%O\r\n"
+                       DateTime.Now
+                       name.Name name.Version
+                       Environment.OSVersion.Version
+                       Environment.Version (IntPtr.Size * 8)
+                       (Registry.GetValue("HKEY_LOCAL_MACHINE\Software\Microsoft\Internet Explorer", "Version", "unknown"))
+                       (Registry.GetValue("HKEY_LOCAL_MACHINE\SOFTWARE\Macromedia\FlashPlayer", "CurrentVersion", "unknown"))
+                       e
+        File.AppendAllText(path, text)
+    AppDomain.CurrentDomain.UnhandledException.Add(fun e -> dump e.ExceptionObject)
+    Application.ThreadException.Add(fun e -> dump e; MessageBox.Show("エラーが発生しました。\r\nKanHQ.txtの内容を報告していただけたら幸いです。", "艦これ 司令部室") |> ignore)
     Application.EnableVisualStyles()
     Application.SetCompatibleTextRenderingDefault false
 
@@ -847,31 +849,32 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
 
     let capture = new Button(Location = Point(970, 560), Anchor = anchorTR, Text = "動画保存", Enabled = captureSupported)
-    capture.Click
-        |> Observable.scan (fun state _ ->
-            match state with
-            | None ->
-                getCapture webBrowser |> Option.bind (fun (size, save) ->
-                    if Control.ModifierKeys = Keys.Shift && not (configCapture ()) then None else
-                    let folder = Settings.Default.VideoFolder
-                    let folder = if Directory.Exists folder then folder else Environment.ExpandEnvironmentVariables @"%USERPROFILE%\Videos"     // .NET 4 has Environment.SpecialFolder.MyVideos
-                    let folder = if Directory.Exists folder then folder else "."
-                    capture.Text <- "保存停止"
-                    let stop = new ManualResetEvent(false)
-                    let completed = new ManualResetEvent(false)
-                    if Capture.start folder size save stop completed then Some (stop, completed) else None)
-            | Some (stop, completed) ->
-                async{
-                    use _ = completed
-                    use _ = stop
-                    capture.Text <- "動画保存"
-                    capture.Enabled <- false
-                    stop.Set() |> ignore
-                    do! Async.AwaitWaitHandle completed |> Async.Ignore
-                    capture.Enabled <- true
-                } |> Async.StartImmediate
-                None) None
-        |> Observable.add ignore
+    capture.Click.Add(let state = ref None in fun _ ->
+        match !state with
+        | None ->
+            getCapture webBrowser |> Option.iter (fun (size, save) ->
+                if Control.ModifierKeys = Keys.Shift && not (configCapture ()) then () else
+                let folder = Settings.Default.VideoFolder
+                let folder = if Directory.Exists folder then folder else Environment.ExpandEnvironmentVariables @"%USERPROFILE%\Videos"     // .NET 4 has Environment.SpecialFolder.MyVideos
+                let folder = if Directory.Exists folder then folder else "."
+                let stop = new ManualResetEvent(false)
+                let completed = new ManualResetEvent(false)
+                Capture.start folder size save stop completed
+                capture.Text <- "保存停止"
+                state := Some (stop, completed))
+        | Some (stop, completed) ->
+            async{
+                use _ = completed
+                use _ = stop
+                capture.Enabled <- false
+                capture.Text <- "保存中"
+                stop.Set() |> ignore
+                let! _ = Async.AwaitWaitHandle completed
+                capture.Text <- "動画保存"
+                capture.Enabled <- true
+                state := None
+            } |> Async.StartImmediate
+    )
 
     let clear = new Button(Location = Point(1051, 560), Anchor = anchorTR, Text = "クリア")
     clear.Click.Add(fun _ ->

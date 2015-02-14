@@ -5,7 +5,6 @@
 #define INITGUID	/* KB130869 */
 #include <Windows.h>
 #include <crtdbg.h>						// for _ASSERTE
-#include <intrin.h>						// for __emulu
 #include <Ks.h>							// for NANOSECONDS, KSCONVERT_PERFORMANCE_TIME
 #include <Shlwapi.h>					// for PathAppend
 #include <type_traits>					// for std::remove_pointer_t
@@ -118,8 +117,7 @@ HRESULT STDMETHODCALLTYPE IDirect3DDevice9_EndScene_Hook(IDirect3DDevice9* This)
 	auto ticks = []() {
 		LARGE_INTEGER value;
 		QueryPerformanceCounter(&value);
-		// optimized, return KSCONVERT_PERFORMANCE_TIME(frequency, value);
-		return (__emulu(value.HighPart, NANOSECONDS) / frequency << 32) + ((__emulu(value.HighPart, NANOSECONDS) % frequency << 32) + __emulu(value.LowPart, NANOSECONDS)) / frequency;
+		return KSCONVERT_PERFORMANCE_TIME(frequency, value);
 	}();
 	static auto start = [This, &ticks]() {
 		IDirect3DSurface9* renderTarget;
@@ -129,7 +127,7 @@ HRESULT STDMETHODCALLTYPE IDirect3DDevice9_EndScene_Hook(IDirect3DDevice9* This)
 		// quick hack, first 'ticks - start' is 1.
 		return ticks++;
 	}();
-	fps = static_cast<unsigned>(__emulu(++count, NANOSECONDS) / (ticks - start));
+	fps = static_cast<unsigned>(static_cast<ULONGLONG>(++count) * NANOSECONDS / (ticks - start));
 
 	auto result = IDirect3DDevice9_EndScene_Orig(This);
 	auto frame = Frame;
