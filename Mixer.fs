@@ -1,5 +1,6 @@
 ﻿namespace Sayuri.Windows.Forms
 open System
+open System.Diagnostics
 open System.Runtime.InteropServices
 open System.Windows.Forms
 open Microsoft.FSharp.NativeInterop
@@ -110,43 +111,57 @@ type MuteCheckBox () as self =
         Option.iter (fst >> mixerClose >> ignore) state
         state <- None
 
-    let updateState hmx controlId =
-        let ptr = NativePtr.stackalloc 1
-        let mxcd = MIXERCONTROLDETAILS(controlId, sizeof<int>, NativePtr.toNativeInt ptr)
-        if mixerGetControlDetails(hmx, mxcd, (*MIXER_GETCONTROLDETAILSF_VALUE*)0x00000000) <> 0 then () else
-        self.Checked <- NativePtr.read ptr <> 0
-
-    override this.OnHandleCreated(e) =
+    let reopen () =
         close ()
         let mutable hmx = 0n
-        if mixerOpen(&hmx, 0, this.Handle, 0n, (*CALLBACK_WINDOW*)0x00010000l) <> 0 then () else
-
+        let result = mixerOpen(&hmx, 0, self.Handle, 0n, (*CALLBACK_WINDOW*)0x00010000l)
+        if result <> 0 then Debug.WriteLine(sprintf "mixerOpen() failed: %d" result) else
         let mutable mxl = MIXERLINE((*MIXERLINE_COMPONENTTYPE_SRC_WAVEOUT*)0x00001008)
-        if mixerGetLineInfo(hmx, &mxl, (*MIXER_GETLINEINFOF_COMPONENTTYPE*)0x00000003) <> 0 then mixerClose hmx |> ignore else
-
+        let result = mixerGetLineInfo(hmx, &mxl, (*MIXER_GETLINEINFOF_COMPONENTTYPE*)0x00000003)
+        if result <> 0 then Debug.WriteLine(sprintf "mixerGetLineInfo() failed: %d" result) else
         let mxctrl = MIXERCONTROL()
         let ptr = NativePtr.stackalloc<byte> mxctrl.cbStruct |> NativePtr.toNativeInt
         Marshal.StructureToPtr(mxctrl, ptr, false)
         let mxlc = MIXERLINECONTROLS(mxl.dwLineID, (*MIXERCONTROL_CONTROLTYPE_MUTE*)0x20010002, mxctrl.cbStruct, ptr)
-        if mixerGetLineControls(hmx, mxlc, (*MIXER_GETLINECONTROLSF_ONEBYTYPE*)0x00000002) <> 0 then mixerClose hmx |> ignore else
-
-        Marshal.PtrToStructure(ptr, mxctrl)
-        updateState hmx mxctrl.dwControlID
+        let result = mixerGetLineControls(hmx, mxlc, (*MIXER_GETLINECONTROLSF_ONEBYTYPE*)0x00000002)
+        if result <> 0 then Debug.WriteLine(sprintf "mixerGetLineControls() failed: %d" result) else
+        let mxctrl = Marshal.PtrToStructure(ptr, typeof<MIXERCONTROL>) :?> MIXERCONTROL
         state <- Some (hmx, mxctrl.dwControlID)
+
+    let updateState () =
+        Option.iter (fun (hmx, controlId) ->
+            let ptr = NativePtr.stackalloc 1
+            let mxcd = MIXERCONTROLDETAILS(controlId, sizeof<int>, NativePtr.toNativeInt ptr)
+            let result = mixerGetControlDetails(hmx, mxcd, (*MIXER_GETCONTROLDETAILSF_VALUE*)0x00000000)
+            if result <> 0 then
+                Debug.WriteLine(sprintf "mixerGetControlDetails() failed: %d" result)
+                reopen ()
+            else
+                self.Checked <- NativePtr.read ptr <> 0
+        ) state
+
+    override this.OnHandleCreated(e) =
+        reopen ()
+        updateState ()
 
     override __.Dispose(disposing) =
         close ()
         base.Dispose disposing
 
     override this.OnClick(e) =
-        state |> Option.iter (fun (hmx, controlId) ->
+        if state = None then reopen ()
+        Option.iter (fun (hmx, controlId) ->
             let ptr = NativePtr.stackalloc 1
             NativePtr.write ptr (if not this.Checked then 1 else 0)
             let mxcd = MIXERCONTROLDETAILS(controlId, sizeof<int>, NativePtr.toNativeInt ptr)
-            mixerSetControlDetails(hmx, mxcd, (*MIXER_SETCONTROLDETAILSF_VALUE*)0x00000000) |> ignore)
+            let result = mixerSetControlDetails(hmx, mxcd, (*MIXER_SETCONTROLDETAILSF_VALUE*)0x00000000)
+            if result <> 0 then
+                Debug.WriteLine(sprintf "mixerSetControlDetails() failed: %d" result)
+                reopen ()
+        ) state
 
     override __.WndProc(m) =
         match m.Msg with
         | (*MM_MIXM_LINE_CHANGE   *)0x3D0 -> ()
-        | (*MM_MIXM_CONTROL_CHANGE*)0x3D1 -> let m = m in Option.iter (fun (hmx, controlId) -> if m.WParam = hmx && int m.LParam = controlId then updateState hmx controlId) state
+        | (*MM_MIXM_CONTROL_CHANGE*)0x3D1 -> let m = m in Option.iter (fun (hmx, controlId) -> if m.WParam = hmx && m.LParam = nativeint controlId then updateState ()) state
         | _                               -> base.WndProc(&m)

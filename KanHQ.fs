@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.5.7.0"; AssemblyVersion "0.5.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.3.0"; AssemblyVersion "0.8.3.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.4.0"; AssemblyVersion "0.8.4.0">]
 #endif
 do
     let values = [|
@@ -579,6 +579,7 @@ type MasterShip (masterid, masterShip : IDictionary<_, _>) =
     static let bindingList = SortableBindingList<MasterShip>(RaiseListChangedEvents = false)
     static let mutable bindedForm = null
     let stype = masterStypes.[getNumber masterShip.["api_stype"]]
+    let afterlv = getNumber masterShip.["api_afterlv"] |> int
     new (masterid) = MasterShip(masterid, masterShips.[masterid])
 
     static member GetBindingList (form : Form) =
@@ -597,6 +598,9 @@ type MasterShip (masterid, masterShip : IDictionary<_, _>) =
     member val Stype = getString stype.["api_name"]
     member val Fuel = getNumber masterShip.["api_fuel_max"] |> int
     member val Bull = getNumber masterShip.["api_bull_max"] |> int
+    member this.AfterLvNo = afterlv
+    [<Sort "AfterLvNo">]
+    member val AfterLv = match afterlv with 0 -> "-" | _ -> string afterlv
 
 type Ship (id : float, masterid) =
     inherit MasterShip (masterid)
@@ -682,7 +686,7 @@ type Ship (id : float, masterid) =
                       elif hp <= 0.75 then "小破"
                       else ""
 
-let shipWindow = lazy(createForm 880 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
+let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
     let grid = new DataGridView(Dock = DockStyle.Fill,
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false)
     (grid :> ISupportInitialize).BeginInit()
@@ -696,6 +700,7 @@ let shipWindow = lazy(createForm 880 664 "艦これ 司令部室 - 艦娘一覧"
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Name",         HeaderText = "艦名", DefaultCellStyle = left) :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Level",        HeaderText = "レベル")                        :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Exp",          HeaderText = "経験値")                        :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "AfterLv",      HeaderText = "改造Lv")                        :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Condition",    HeaderText = "状態")                          :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Hp",           HeaderText = "耐久")                          :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Karyoku",      HeaderText = "火力")                          :> DataGridViewColumn
