@@ -5,11 +5,6 @@ open Microsoft.Win32.SafeHandles
 
 #nowarn "9"
 
-[<DllImport("Avrt.dll", CharSet = CharSet.Unicode)>]
-extern nativeint private AvSetMmThreadCharacteristics(string TaskName, uint32& TaskIndex);
-[<DllImport("Avrt.dll")>]
-extern bool private AvRevertMmThreadCharacteristics(nativeint AvrtHandle);
-
 [<ComImport; Guid "00000001-0000-0000-C000-000000000046"; InterfaceType(ComInterfaceType.InterfaceIsIUnknown)>]
 type IClassFactory =
     abstract member CreateInstance : [<MarshalAs(UnmanagedType.IUnknown)>] pUnkOuter : obj * [<MarshalAs(UnmanagedType.LPStruct)>] riid : Guid * [<Out; MarshalAs(UnmanagedType.Interface)>] ppvObject : obj byref -> unit
@@ -694,7 +689,6 @@ let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventW
             match Settings.Default.Extension.ToLowerInvariant() |> table.TryGetValue with
             | true, (video, audio) -> Settings.Default.Extension, video, audio
             | false, _             -> "wmv", MFVideoFormat_WMV3, MFAudioFormat_WMAudioV9
-        use _ = resource (fun () -> let mutable taskIndex = 0u in AvSetMmThreadCharacteristics("Games", &taskIndex)) (AvRevertMmThreadCharacteristics >> ignore)
         use _ = resource (fun () -> MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)) MFShutdown
         use _ = new MFTransformClassFactory(MFMediaType_Video, videoFormat, Settings.Default.VideoCodec)
         use _ = new MFTransformClassFactory(MFMediaType_Audio, audioFormat, Settings.Default.AudioCodec)

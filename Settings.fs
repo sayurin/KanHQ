@@ -6,11 +6,11 @@ open System.Reflection
 type Settings () =
     inherit ApplicationSettingsBase ()
 
-    static let defaultInstance = Settings () |> ApplicationSettingsBase.Synchronized :?> Settings
+    static let defaultInstance = Settings () |> SettingsBase.Synchronized :?> Settings
     static do
         let version = Assembly.GetExecutingAssembly().GetName().Version
         if String.IsNullOrEmpty defaultInstance.Version || Version defaultInstance.Version < version then
-            defaultInstance.Upgrade()
+            try defaultInstance.Upgrade() with :? ConfigurationErrorsException -> defaultInstance.Reset()
             defaultInstance.Version <- version.ToString()
             defaultInstance.Save()
 

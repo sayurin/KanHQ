@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.6.0"; AssemblyVersion "0.8.6.0">]
 #endif
 do
     let values = [|
@@ -77,8 +77,8 @@ do
                        name.Name name.Version
                        Environment.OSVersion.Version
                        Environment.Version (IntPtr.Size * 8)
-                       (Registry.GetValue("HKEY_LOCAL_MACHINE\Software\Microsoft\Internet Explorer", "Version", "unknown"))
-                       (Registry.GetValue("HKEY_LOCAL_MACHINE\SOFTWARE\Macromedia\FlashPlayer", "CurrentVersion", "unknown"))
+                       (Registry.GetValue(@"HKEY_LOCAL_MACHINE\Software\Microsoft\Internet Explorer", "Version", "unknown"))
+                       (Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Macromedia\FlashPlayer", "CurrentVersion", "unknown"))
                        e
         File.AppendAllText(path, text)
     AppDomain.CurrentDomain.UnhandledException.Add(fun e -> dump e.ExceptionObject)
@@ -638,6 +638,7 @@ type Ship private (id : float) =
     [<Sort "NdockTimeSpan">]
     member val NdockTime = "-" with get, set
     member val State = "" with get, set
+    member val Locked = false with get, set
     member this.Update ship =
         let newMasterId = getNumber ship.["api_ship_id"]
         if masterid <> newMasterId then
@@ -681,6 +682,7 @@ type Ship private (id : float) =
                       elif hp <= 0.50 then "中破"
                       elif hp <= 0.75 then "小破"
                       else ""
+        this.Locked <- getNumber ship.["api_locked"] = 1.0
 
 type Slotitem (masterid, count, shipNames) =
     let master = masterSlotitems.[masterid]
@@ -759,7 +761,7 @@ type Slotitem (masterid, count, shipNames) =
     member val Meichu = toString meichu
     member val ShipNames = shipNames with get, set
 
-let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
+let shipWindow = lazy(createForm 925 664 "艦これ 司令部室 - 艦娘一覧" (fun form ->
     let shipGrid = new DataGridView(Dock = DockStyle.Fill,
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false)
     (shipGrid :> ISupportInitialize).BeginInit()
@@ -771,19 +773,21 @@ let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧"
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 30, DataPropertyName = "ShipId",       HeaderText = "ID")                            :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Stype",        HeaderText = "艦種", DefaultCellStyle = left) :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 90, DataPropertyName = "Name",         HeaderText = "艦名", DefaultCellStyle = left) :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Level",        HeaderText = "レベル")                        :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Exp",          HeaderText = "経験値")                        :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "AfterLv",      HeaderText = "改造Lv")                        :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Condition",    HeaderText = "状態")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Hp",           HeaderText = "耐久")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Karyoku",      HeaderText = "火力")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Taiku",        HeaderText = "対空")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Raisou",       HeaderText = "雷装")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Soukou",       HeaderText = "装甲")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Kaihi",        HeaderText = "回避")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Taisen",       HeaderText = "対潜")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Sakuteki",     HeaderText = "索敵")                          :> DataGridViewColumn
-        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 40, DataPropertyName = "Lucky",        HeaderText = "運")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Level",        HeaderText = "レベル")                        :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Exp",          HeaderText = "経験値")                        :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "AfterLv",      HeaderText = "改造Lv")                        :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Condition",    HeaderText = "状態")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Hp",           HeaderText = "耐久")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Karyoku",      HeaderText = "火力")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Taiku",        HeaderText = "対空")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Raisou",       HeaderText = "雷装")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Soukou",       HeaderText = "装甲")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Kaihi",        HeaderText = "回避")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Taisen",       HeaderText = "対潜")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Sakuteki",     HeaderText = "索敵")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Lucky",        HeaderText = "運")                            :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Fuel",         HeaderText = "燃料")                          :> DataGridViewColumn
+        new DataGridViewTextBoxColumn(ReadOnly = true, Width = 35, DataPropertyName = "Bull",         HeaderText = "弾薬")                          :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 60, DataPropertyName = "NdockTime",    HeaderText = "修理時間")                      :> DataGridViewColumn
         new DataGridViewTextBoxColumn(ReadOnly = true, Width = 60, DataPropertyName = "State",        HeaderText = "状態", DefaultCellStyle = left) :> DataGridViewColumn
     |]
@@ -818,6 +822,7 @@ let shipWindow = lazy(createForm 920 664 "艦これ 司令部室 - 艦娘一覧"
                 image.Image <- images.[!index])
             form.Controls.Add image)
         form.Show())
+    shipGrid.CellFormatting.Add(fun e -> e.CellStyle.ForeColor <- if bindingList.[e.RowIndex].Locked then SystemColors.ControlText else SystemColors.GrayText)
     (shipGrid :> ISupportInitialize).EndInit()
     let slotitemGrid = new DataGridView(Dock = DockStyle.Fill,
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false)
@@ -1271,18 +1276,30 @@ let afterSessionComplete (oSession : Session) =
                 Ship.UpdateShips()
                 Slotitem.UpdateItems()
         | path ->
-            let m = Regex.Match(path, "^/kcs/resources/swf/ships/([^.]+\.swf)")
+            let m = Regex.Match(path, @"^/kcs/resources/swf/ships/([^.]+\.swf)")
             if m.Success then
-                use storage = IsolatedStorageFile.GetUserStoreForAssembly()
-                storage.CreateDirectory "ships"
-                use file = new IsolatedStorageFileStream(sprintf "ships/%s" m.Groups.[1].Value, FileMode.Create, storage)
                 oSession.utilDecodeResponse() |> ignore
-                file.Write(oSession.responseBodyBytes, 0, oSession.responseBodyBytes.Length)
+                let bytes = oSession.responseBodyBytes
+                if 0 < bytes.Length then
+                    use storage = IsolatedStorageFile.GetUserStoreForAssembly()
+                    storage.CreateDirectory "ships"
+                    use file = new IsolatedStorageFileStream(sprintf "ships/%s" m.Groups.[1].Value, FileMode.Create, storage)
+                    file.Write(bytes, 0, bytes.Length)
     with e -> Debug.WriteLine e
 #endif
 
+[<DllImport("Avrt.dll", CharSet = CharSet.Unicode)>]
+extern nativeint private AvSetMmThreadCharacteristics(string TaskName, uint32& TaskIndex);
+[<DllImport("Avrt.dll")>]
+extern bool private AvRevertMmThreadCharacteristics(nativeint AvrtHandle);
+
 [<EntryPoint; STAThread>]
 let main argv =
+    try
+        let mutable taskIndex = 0u
+        AvSetMmThreadCharacteristics("Games", &taskIndex) |> ignore
+    with _ -> ()
+
 #if LIGHT
 #else
     use agent = MailboxProcessor.Start(fun inbox ->
