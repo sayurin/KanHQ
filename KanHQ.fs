@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.9.0"; AssemblyVersion "0.8.9.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.9.0.0"; AssemblyVersion "0.9.0.0">]
 #endif
 do
     let values = [|
@@ -800,7 +800,10 @@ let shipWindow = lazy(createForm 925 664 "艦これ 司令部室 - 艦娘一覧"
         let ship = bindingList.[c.RowIndex]
         let images =
             use storage = IsolatedStorageFile.GetUserStoreForAssembly()
-            let map = masterShips |> Seq.choose (fun pair -> match getString pair.Value.["api_aftershipid"] with "0" -> None | afterid -> Some (float afterid, pair.Key)) |> dict
+            let map = masterShips |> Seq.choose (fun (KeyValue (key, value)) -> match value.TryGetValue "api_aftershipid" with
+                                                                                | true, JsonString afterid when afterid <> "0" -> Some (float afterid, key)
+                                                                                | _,    _                                      -> None)
+                                  |> dict
             Some ship.ShipId
             |> Seq.unfold (Option.map (fun id -> get "api_filename" masterGraph.[id] |> getString, match map.TryGetValue id with true, id -> Some id | false, _ -> None))
             |> Seq.distinct
