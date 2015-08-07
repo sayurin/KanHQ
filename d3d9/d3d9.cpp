@@ -1,6 +1,7 @@
 #define _WIN32_WINNT _WIN32_WINNT_WIN2K
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#define _HAS_EXCEPTIONS 0
 #define CINTERFACE	/* use C interface mode to access vtable. */
 #define INITGUID	/* KB130869 */
 #include <Windows.h>

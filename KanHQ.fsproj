@@ -58,18 +58,24 @@
   </Choose>
   <Import Project="$(FSharpTargetsPath)" />
   <Target Name="BeforeBuild">
-    <MSBuild Projects="@(D3d9)" Targets="Build" />
+    <MSBuild Projects="@(Native)" Targets="Build" />
   </Target>
   <Target Name="BeforeClean">
-    <MSBuild Projects="@(D3d9)" Targets="Clean" />
+    <MSBuild Projects="@(Native)" Targets="Clean" />
   </Target>
   <ItemGroup>
-    <D3d9 Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
+    <Native Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
       <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x64\;Platform=x64</Properties>
-    </D3d9>
-    <D3d9 Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
+    </Native>
+    <Native Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
       <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x86\;Platform=Win32</Properties>
-    </D3d9>
+    </Native>
+    <Native Include="WININET\WININET.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
+      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x64\;Platform=x64</Properties>
+    </Native>
+    <Native Include="WININET\WININET.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
+      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x86\;Platform=Win32</Properties>
+    </Native>
     <Compile Include="Local.fs" />
     <Compile Include="Settings.fs" />
     <Compile Include="TextBox2.fs" />
@@ -98,9 +104,6 @@
     <None Include="KanHQ.snk" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="FiddlerCore" Condition=" '$(Configuration)' != 'LightRelease' ">
-      <HintPath>FiddlerCore.dll</HintPath>
-    </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
       <Private>True</Private>

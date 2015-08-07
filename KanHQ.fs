@@ -12,6 +12,7 @@ open System.Net
 open System.Net.NetworkInformation
 open System.Reflection
 open System.Runtime.InteropServices
+open System.Text
 open System.Text.RegularExpressions
 open System.Threading
 open System.Windows.Forms
@@ -25,7 +26,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.9.2.0"; AssemblyVersion "0.9.2.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "1.0.0.0"; AssemblyVersion "1.0.0.0">]
 #endif
 do
     let values = [|
@@ -85,6 +86,17 @@ do
     Application.ThreadException.Add(fun e -> dump e.Exception; MessageBox.Show("エラーが発生しました。\r\nKanHQ.txtの内容を報告していただけたら幸いです。", "艦これ 司令部室") |> ignore)
     Application.EnableVisualStyles()
     Application.SetCompatibleTextRenderingDefault false
+
+[<UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet=CharSet.Unicode)>]
+type OnRequest = delegate of path : string -> bool
+[<UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet=CharSet.Unicode)>]
+type OnResponse = delegate of path : string *  [<MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2s)>] request : byte[] * requestSize : int * [<MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 4s)>] response : byte[] * responseSize : int -> unit
+[<DllImport("Kernel32.dll", CharSet = CharSet.Unicode)>]
+extern nativeint private LoadLibrary(string lpFileName);
+[<DllImport("wininet.dll", CharSet = CharSet.Unicode)>]
+extern void private SetCallback(OnRequest onRequest, OnResponse onResponse);
+
+let wininet = LoadLibrary(if IntPtr.Size = 8 then @"x64\wininet.dll" else @"x86\wininet.dll")
 
 let captureSupported = Capture.test ()
 
@@ -1065,87 +1077,75 @@ let mainWindow () = createForm (browserWidth + 181) 668 "艦これ 司令部室"
     panel.PerformLayout()
     form.Controls.Add panel)
 
-let unusedPort port =
-    let props = IPGlobalProperties.GetIPGlobalProperties()
-    let connections = props.GetActiveTcpConnections() |> Array.map (fun info -> info.LocalEndPoint)
-    let listeners = props.GetActiveTcpListeners()
-    let ports = Array.append connections listeners |> Array.map (fun ep -> ep.Port)
-    let rec loop port =
-        if Array.forall ((<>) port) ports then port else loop (port + 1)
-    loop port
-
-open Fiddler
-
-let parseQuery line =
-    let m = Regex.Match(line, @"(?:(?:^|&)(?<key>[^&=]+)=?(?<value>[^&=]*))*$")
-    let captures (key : string) =
-        let captures = m.Groups.[key].Captures
-        Array.init captures.Count (fun i -> Regex.Replace(captures.[i].Value.Replace('+', ' '), @"%([0-9A-Fa-f]{2})", fun m -> Int32.Parse(m.Groups.[1].Value, NumberStyles.AllowHexSpecifier) |> char |> string))
-    if not m.Success then invalidArg "line" "bad format"
-    Array.zip (captures "key") (captures "value") |> dict
-
-let parseJson (oSession : Session) =
-    let response = oSession.GetResponseBodyAsString()
-    let offset = if response.StartsWith "svdata=" then 7 else 0
-    deserialize offset response |> getObject
 
 let epoch = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).ToLocalTime()
 let masterQuests = [| ""; "編成"; "出撃"; "演習"; "遠征"; "入渠"; "工廠"; "改装" |]
 let completedQuests = ResizeArray()
 
-let afterSessionComplete (oSession : Session) =
-    try
-        let toDateTime json =
-            let tick = getNumber json
-            if tick = 0.0 then None else
-            epoch + TimeSpan.FromMilliseconds tick |> Some
-        let updateShips key json =
-            lock ships (fun () -> ships.Clear()
-                                  get key json |> getArray |> Array.iter (fun ship -> let ship = getObject ship in ships.Add(getNumber ship.["api_id"], ship)))
-            Ship.UpdateShips()
-            Slotitem.UpdateItems()
-            Mission.UpdateDecks()
-        let mission key json =
-            decks <- get key json
-                  |> getArray
-                  |> Array.map getObject
-            Mission.UpdateDecks()
-            missionTimes <- decks.[1..]
-                         |> Array.map (fun deck -> let mission = getArray deck.["api_mission"]
-                                                   toDateTime mission.[2] |> Option.map (fun dateTime -> dateTime, match getNumber mission.[1] |> masterMissions.TryGetValue with
-                                                                                                                   | true, name -> name
-                                                                                                                   | false, _   -> "遠征中"))
-        let basic data =
-            let data = getObject data
-            maxCount <- getNumber data.["api_max_chara"] |> int, (getNumber data.["api_max_slotitem"] |> int) + 3
-            hqLevel <- getNumber data.["api_level"] |> int
-        let ndock data =
-            let docks = getArray data |> Array.map (fun dock -> let dock = getObject dock
-                                                                toDateTime dock.["api_complete_time"] |> Option.map (fun dateTime -> dateTime, getNumber dock.["api_ship_id"]))
-            dockTimes <- Array.map (Option.map (fun (dateTime, sid) -> dateTime, getString masterShips.[getNumber ships.[sid].["api_ship_id"]].["api_name"])) docks
-            dockShips <- Array.choose (Option.map snd) docks
-        let kdock data =
-            kousyouTimes <- getArray data
-                         |> Array.map (fun kousyou -> let kousyou = getObject kousyou
-                                                      let shipId = getNumber kousyou.["api_created_ship_id"]
-                                                      if shipId = 0.0 then None else
-                                                      let name = if Settings.Default.ShowShipName then getString masterShips.[shipId].["api_name"] else ""
-                                                      Some (defaultArg (toDateTime kousyou.["api_complete_time"]) DateTime.Today, name))
-        let destroyship shipid =
-            decks |> Array.iter (fun deck -> let shipids = getArray deck.["api_ship"]
-                                             shipids |> Array.tryFindIndex (fun ship -> getNumber ship = shipid)
-                                                     |> Option.iter (fun index -> for i in index .. shipids.Length - 2 do shipids.[i] <- shipids.[i + 1]
-                                                                                  shipids.[shipids.Length - 1] <- JsonNumber -1.0))
-            let itemids = lock ships (fun () -> let itemids = getArray ships.[shipid].["api_slot"]
-                                                ships.Remove shipid |> ignore
-                                                itemids)
-            lock slotitems (fun () -> Array.iter (getNumber >> function -1.0 -> () | itemid -> slotitems.Remove itemid |> ignore) itemids)
-            Ship.UpdateShips()
-            Slotitem.UpdateItems()
+let action path =
+    let parseJson (res : byte[]) =
+        let response = Encoding.UTF8.GetString res
+        let offset = if response.StartsWith "svdata=" then 7 else 0
+        deserialize offset response |> getObject
+    let parseQuery (req : byte[]) =
+        let m = Regex.Match(Encoding.UTF8.GetString req, @"(?:(?:^|&)(?<key>[^&=]+)=?(?<value>[^&=]*))*$")
+        let captures (key : string) =
+            let captures = m.Groups.[key].Captures
+            Array.init captures.Count (fun i -> Regex.Replace(captures.[i].Value.Replace('+', ' '), @"%([0-9A-Fa-f]{2})", fun m -> Int32.Parse(m.Groups.[1].Value, NumberStyles.AllowHexSpecifier) |> char |> string))
+        if not m.Success then invalidArg "line" "bad format"
+        Array.zip (captures "key") (captures "value") |> dict
+    let toDateTime json =
+        let tick = getNumber json
+        if tick = 0.0 then None else
+        epoch + TimeSpan.FromMilliseconds tick |> Some
+    let updateShips key json =
+        lock ships (fun () -> ships.Clear()
+                              get key json |> getArray |> Array.iter (fun ship -> let ship = getObject ship in ships.Add(getNumber ship.["api_id"], ship)))
+        Ship.UpdateShips()
+        Slotitem.UpdateItems()
+        Mission.UpdateDecks()
+    let mission key json =
+        decks <- get key json
+              |> getArray
+              |> Array.map getObject
+        Mission.UpdateDecks()
+        missionTimes <- decks.[1..]
+                     |> Array.map (fun deck -> let mission = getArray deck.["api_mission"]
+                                               toDateTime mission.[2] |> Option.map (fun dateTime -> dateTime, match getNumber mission.[1] |> masterMissions.TryGetValue with
+                                                                                                               | true, name -> name
+                                                                                                               | false, _   -> "遠征中"))
+    let basic data =
+        let data = getObject data
+        maxCount <- getNumber data.["api_max_chara"] |> int, (getNumber data.["api_max_slotitem"] |> int) + 3
+        hqLevel <- getNumber data.["api_level"] |> int
+    let ndock data =
+        let docks = getArray data |> Array.map (fun dock -> let dock = getObject dock
+                                                            toDateTime dock.["api_complete_time"] |> Option.map (fun dateTime -> dateTime, getNumber dock.["api_ship_id"]))
+        dockTimes <- Array.map (Option.map (fun (dateTime, sid) -> dateTime, getString masterShips.[getNumber ships.[sid].["api_ship_id"]].["api_name"])) docks
+        dockShips <- Array.choose (Option.map snd) docks
+    let kdock data =
+        kousyouTimes <- getArray data
+                     |> Array.map (fun kousyou -> let kousyou = getObject kousyou
+                                                  let shipId = getNumber kousyou.["api_created_ship_id"]
+                                                  if shipId = 0.0 then None else
+                                                  let name = if Settings.Default.ShowShipName then getString masterShips.[shipId].["api_name"] else ""
+                                                  Some (defaultArg (toDateTime kousyou.["api_complete_time"]) DateTime.Today, name))
+    let destroyship shipid =
+        decks |> Array.iter (fun deck -> let shipids = getArray deck.["api_ship"]
+                                         shipids |> Array.tryFindIndex (fun ship -> getNumber ship = shipid)
+                                                 |> Option.iter (fun index -> for i in index .. shipids.Length - 2 do shipids.[i] <- shipids.[i + 1]
+                                                                              shipids.[shipids.Length - 1] <- JsonNumber -1.0))
+        let itemids = lock ships (fun () -> let itemids = getArray ships.[shipid].["api_slot"]
+                                            ships.Remove shipid |> ignore
+                                            itemids)
+        lock slotitems (fun () -> Array.iter (getNumber >> function -1.0 -> () | itemid -> slotitems.Remove itemid |> ignore) itemids)
+        Ship.UpdateShips()
+        Slotitem.UpdateItems()
 
-        match oSession.PathAndQuery with
-        | "/kcsapi/api_start2" ->
-            let data = parseJson oSession |> get "api_data" |> getObject
+    match path with
+    | "/kcsapi/api_start2" ->
+        Some(fun req res ->
+            let data = parseJson res |> get "api_data" |> getObject
             let update (master : Dictionary<_, _>) key =
                 for item in getArray data.[key] do
                     let item = getObject item
@@ -1179,17 +1179,21 @@ let afterSessionComplete (oSession : Session) =
             for item in getArray data.["api_mst_mission"] do
                 let item = getObject item
                 masterMissions.[getNumber item.["api_id"]] <- getString item.["api_name"]
-        | "/kcsapi/api_req_member/get_incentive" -> // 初回と再読み込み時も
-            quests <- [| None |]
-        | "/kcsapi/api_get_member/basic" ->         // 起動時とあと時々
-            parseJson oSession |> get "api_data" |> basic
-        | "/kcsapi/api_get_member/slot_item" ->      // 起動時に装備一覧を取得している。
-            let items = parseJson oSession |> get "api_data" |> getArray |> Array.map getObject
+        )
+    | "/kcsapi/api_req_member/get_incentive" -> // 初回と再読み込み時も
+        Some(fun req res -> quests <- [| None |])
+    | "/kcsapi/api_get_member/basic" ->         // 起動時とあと時々
+        Some(fun req res -> parseJson res |> get "api_data" |> basic)
+    | "/kcsapi/api_get_member/slot_item" ->      // 起動時に装備一覧を取得している。
+        Some(fun req res ->
+            let items = parseJson res |> get "api_data" |> getArray |> Array.map getObject
             lock slotitems (fun () -> slotitems.Clear()
                                       items |> Array.iter (fun item -> slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"])))
             Slotitem.UpdateItems()
-        | "/kcsapi/api_get_member/questlist" ->     // 任務を操作後に最新情報を取得している。
-            let data = parseJson oSession
+        )
+    | "/kcsapi/api_get_member/questlist" ->     // 任務を操作後に最新情報を取得している。
+        Some(fun req res ->
+            let data = parseJson res
                     |> get "api_data"
                     |> getObject
             match data.["api_list"] with
@@ -1209,27 +1213,35 @@ let afterSessionComplete (oSession : Session) =
                 let sortedQuests = Array.append restQuests newQuests |> Array.sort
                 quests <- Array.init count (fun i -> if i < sortedQuests.Length then Some sortedQuests.[i] else None)
             | _ -> ()
-        | "/kcsapi/api_req_quest/clearitemget" ->   // 完遂した任務の報酬を受け取る。
-            let completedQuestId = oSession.GetRequestBodyAsString() |> parseQuery |> get "api_quest_id" |> float
+        )
+    | "/kcsapi/api_req_quest/clearitemget" ->   // 完遂した任務の報酬を受け取る。
+        Some(fun req res ->
+            let completedQuestId = parseQuery req |> get "api_quest_id" |> float
             quests <- Array.filter (function Some (id, _) -> id <> completedQuestId | None -> true) quests
-        | "/kcsapi/api_get_member/deck" ->          // 遠征後に艦隊情報を取得している。
-            parseJson oSession |> mission "api_data"
-        | "/kcsapi/api_port/port" ->
-            let data = parseJson oSession |> get "api_data" |> getObject
+        )
+    | "/kcsapi/api_get_member/deck" ->          // 遠征後に艦隊情報を取得している。
+        Some(fun req res -> parseJson res |> mission "api_data")
+    | "/kcsapi/api_port/port" ->
+        Some(fun req res ->
+            let data = parseJson res |> get "api_data" |> getObject
             updateShips "api_ship" data
             mission "api_deck_port" data
             basic data.["api_basic"]
             ndock data.["api_ndock"]
-        | "/kcsapi/api_get_member/ship2" ->         // 遠征後と入渠時に艦情報の一覧を取得している。
-            let json = parseJson oSession
+        )
+    | "/kcsapi/api_get_member/ship2" ->         // 遠征後と入渠時に艦情報の一覧を取得している。
+        Some(fun req res ->
+            let json = parseJson res
             updateShips "api_data" json
             mission "api_data_deck" json
-        | "/kcsapi/api_get_member/ndock" ->         // 起動時と入渠時に状態を取得している。艦名は含まれていない。先行する /ship か /ship2 の情報が必要
-            parseJson oSession |> get "api_data" |> ndock
-        | "/kcsapi/api_get_member/kdock" ->         // 建造時に状態を取得している。
-            parseJson oSession |> get "api_data" |> kdock
-        | "/kcsapi/api_req_kousyou/getship" ->
-            let data = parseJson oSession |> get "api_data" |> getObject
+        )
+    | "/kcsapi/api_get_member/ndock" ->         // 起動時と入渠時に状態を取得している。艦名は含まれていない。先行する /ship か /ship2 の情報が必要
+        Some(fun req res -> parseJson res |> get "api_data" |> ndock)
+    | "/kcsapi/api_get_member/kdock" ->         // 建造時に状態を取得している。
+        Some(fun req res -> parseJson res |> get "api_data" |> kdock)
+    | "/kcsapi/api_req_kousyou/getship" ->
+        Some(fun req res ->
+            let data = parseJson res |> get "api_data" |> getObject
             match data.TryGetValue "api_slotitem" with
             | false, _ -> ()
             | true, items -> lock slotitems (fun () -> getArray items |> Array.iter (fun item -> let item = getObject item in slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"])))
@@ -1238,33 +1250,43 @@ let afterSessionComplete (oSession : Session) =
             Ship.UpdateShips()
             Slotitem.UpdateItems()
             kdock data.["api_kdock"]
-        | "/kcsapi/api_req_kousyou/destroyship" ->
-            oSession.GetRequestBodyAsString() |> parseQuery |> get "api_ship_id" |> float |> destroyship
+        )
+    | "/kcsapi/api_req_kousyou/destroyship" ->
+        Some(fun req res ->
+            parseQuery req |> get "api_ship_id" |> float |> destroyship
             Mission.UpdateDecks()
-        | "/kcsapi/api_req_kousyou/createitem" ->
-            let data = parseJson oSession |> get "api_data" |> getObject
+        )
+    | "/kcsapi/api_req_kousyou/createitem" ->
+        Some(fun req res ->
+            let data = parseJson res |> get "api_data" |> getObject
             match data.TryGetValue "api_slot_item" with
             | false, _ -> ()
             | true, item -> let item = getObject item
                             lock slotitems (fun () -> slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"]))
                             Slotitem.UpdateItems()
-        | "/kcsapi/api_req_kousyou/destroyitem2" ->
-            let slotitemids = oSession.GetRequestBodyAsString() |> parseQuery |> get "api_slotitem_ids"
+        )
+    | "/kcsapi/api_req_kousyou/destroyitem2" ->
+        Some(fun req res ->
+            let slotitemids = parseQuery req |> get "api_slotitem_ids"
             lock slotitems (fun () -> slotitemids.Split ',' |> Array.iter (float >> slotitems.Remove >> ignore))
             Slotitem.UpdateItems()
-        | "/kcsapi/api_req_kaisou/powerup" ->
-            let request = oSession.GetRequestBodyAsString() |> parseQuery
+        )
+    | "/kcsapi/api_req_kaisou/powerup" ->
+        Some(fun req res ->
+            let request = parseQuery req
             request.["api_id_items"].Split ',' |> Array.iter (float >> destroyship)
-            let data = parseJson oSession |> get "api_data" |> getObject
+            let data = parseJson res |> get "api_data" |> getObject
             lock ships (fun () -> ships.[float request.["api_id"]] <- getObject data.["api_ship"])
             Ship.UpdateShips()
             Slotitem.UpdateItems()
             mission "api_deck" data
-        | "/kcsapi/api_req_hensei/change" ->
+        )
+    | "/kcsapi/api_req_hensei/change" ->
+        Some(fun req res ->
             let remove shipids index =
                 for i = index to Array.length shipids - 2 do shipids.[i] <- shipids.[i + 1]
                 shipids.[shipids.Length - 1] <- JsonNumber -1.0
-            let request = oSession.GetRequestBodyAsString() |> parseQuery
+            let request = parseQuery req
             let shipids = getArray decks.[int request.["api_id"] - 1].["api_ship"]
             match int request.["api_ship_idx"], float request.["api_ship_id"] with
             |  -1, _    -> for i in 1 .. shipids.Length - 1 do shipids.[i] <- JsonNumber -1.0
@@ -1275,37 +1297,43 @@ let afterSessionComplete (oSession : Session) =
                                                                     |> Option.iter (fun idx -> if sid2 = -1.0 then remove shipids idx else shipids.[idx] <- JsonNumber sid2))
                            shipids.[if 0 < idx && getNumber shipids.[idx - 1] = -1.0 then idx - 1 else idx] <- JsonNumber sid1
             Mission.UpdateDecks()
-        | "/kcsapi/api_get_member/ship3" ->
-            let data = parseJson oSession |> get "api_data" |> getObject
+        )
+    | "/kcsapi/api_get_member/ship3" ->
+        Some(fun req res ->
+            let data = parseJson res |> get "api_data" |> getObject
             lock ships (fun () -> getArray data.["api_ship_data"] |> Array.iter (fun ship -> let ship = getObject ship in ships.[getNumber ship.["api_id"]] <- ship))
             Ship.UpdateShips()
             Slotitem.UpdateItems()
             mission "api_deck_data" data
-        | "/kcsapi/api_get_member/ship_deck" ->
-            let data = parseJson oSession |> get "api_data" |> getObject
+        )
+    | "/kcsapi/api_get_member/ship_deck" ->
+        Some(fun req res ->
+            let data = parseJson res |> get "api_data" |> getObject
             lock ships (fun () -> getArray data.["api_ship_data"] |> Array.iter (fun ship -> let ship = getObject ship in ships.[getNumber ship.["api_id"]] <- ship))
             Ship.UpdateShips()
             Slotitem.UpdateItems()
             // ignore api_deck_data because broken.
             // mission "api_deck_data" data
-        | "/kcsapi/api_req_nyukyo/start" ->         // 入渠命令
-            let request = oSession.GetRequestBodyAsString() |> parseQuery
+        )
+    | "/kcsapi/api_req_nyukyo/start" ->         // 入渠命令
+        Some(fun req res ->
+            let request = parseQuery req
             if int request.["api_highspeed"] = 1 then
                 let ship = lock ships (fun () -> ships.[float request.["api_ship_id"]])
                 ship.["api_nowhp"] <- ship.["api_maxhp"]
                 Ship.UpdateShips()
                 Slotitem.UpdateItems()
-        | path ->
-            let m = Regex.Match(path, @"^/kcs/resources/swf/ships/([^.]+\.swf)")
-            if m.Success then
-                oSession.utilDecodeResponse() |> ignore
-                let bytes = oSession.responseBodyBytes
-                if 0 < bytes.Length then
-                    use storage = IsolatedStorageFile.GetUserStoreForAssembly()
-                    storage.CreateDirectory "ships"
-                    use file = new IsolatedStorageFileStream(sprintf "ships/%s" m.Groups.[1].Value, FileMode.Create, storage)
-                    file.Write(bytes, 0, bytes.Length)
-    with e -> Debug.WriteLine e
+        )
+    | path ->
+        let m = Regex.Match(path, @"^/kcs/resources/swf/ships/([^.]+\.swf)")
+        if not m.Success then None else
+        Some(fun req res ->
+            if 0 < res.Length then
+                use storage = IsolatedStorageFile.GetUserStoreForAssembly()
+                storage.CreateDirectory "ships"
+                use file = new IsolatedStorageFileStream(sprintf "ships/%s" m.Groups.[1].Value, FileMode.Create, storage)
+                file.Write(res, 0, res.Length)
+        )
 #endif
 
 [<DllImport("Avrt.dll", CharSet = CharSet.Unicode)>]
@@ -1324,18 +1352,18 @@ let main argv =
 #else
     use agent = MailboxProcessor.Start(fun inbox ->
         let rec loop () = async {
-            let! session = inbox.Receive()
-            afterSessionComplete session
+            let! path, req, res = inbox.Receive()
+            try
+                (action path |> Option.get) req res
+            with e -> Debug.WriteLine e
             return! loop ()
         }
         loop ())
-    use __ = resource
-                (fun () -> let port = unusedPort 0x344F
-                           FiddlerApplication.add_AfterSessionComplete(SessionStateHandler agent.Post)
-                           FiddlerApplication.Startup(port, FiddlerCoreStartupFlags.ChainToUpstreamGateway)
-                           URLMonInterop.SetProxyInProcess(sprintf "127.0.0.1:%d" port, null))
-                (fun () -> URLMonInterop.ResetProxyInProcessToDefault()
-                           FiddlerApplication.Shutdown())
+    let onRequest = OnRequest(fun path -> action path |> Option.isSome)
+    let onResponse = OnResponse(fun path req reqlen res reslen -> agent.Post (path, req, res))
+    let onRequestHandle = GCHandle.Alloc onRequest
+    let onResponseHandle = GCHandle.Alloc onResponse
+    SetCallback(onRequest, onResponse)
 #endif
 
     mainWindow () |> Application.Run

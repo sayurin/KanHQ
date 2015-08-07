@@ -1,11 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 2013
-VisualStudioVersion = 12.0.31101.0
+# Visual Studio 14
+VisualStudioVersion = 14.0.23107.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "KanHQ", "KanHQ.fsproj", "{8987BD19-CC77-4959-A4E3-203714C613D5}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "d3d9", "d3d9\d3d9.vcxproj", "{B805E2F6-08A9-4985-9626-65D812C6E52A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WININET", "WININET\WININET.vcxproj", "{B6C56786-EDAB-4E2A-8570-C3C17DACEA75}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -23,6 +25,9 @@ Global
 		{B805E2F6-08A9-4985-9626-65D812C6E52A}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
 		{B805E2F6-08A9-4985-9626-65D812C6E52A}.LightRelease|Mixed Platforms.ActiveCfg = Release|Win32
 		{B805E2F6-08A9-4985-9626-65D812C6E52A}.Release|Mixed Platforms.ActiveCfg = Release|Win32
+		{B6C56786-EDAB-4E2A-8570-C3C17DACEA75}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
+		{B6C56786-EDAB-4E2A-8570-C3C17DACEA75}.LightRelease|Mixed Platforms.ActiveCfg = Release|Win32
+		{B6C56786-EDAB-4E2A-8570-C3C17DACEA75}.Release|Mixed Platforms.ActiveCfg = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

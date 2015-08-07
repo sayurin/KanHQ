@@ -1,6 +1,6 @@
 ﻿艦これ 司令部室
-Version 0.9.2.0
-2015/07/26
+Version 1.0.0.0
+2015/08/07
 
 このソフトは艦これ専用ブラウザーです。
 
@@ -11,7 +11,5 @@ IEコンポーネントを使用しています。そのため、IE向けFlash P
 欲しい物リストを公開しています。応援してもらえるといろいろはかどります。
 <http://www.amazon.co.jp/registry/wishlist/9QZQ2PEKD8KB/>
 
-艦これ 司令部室向け
-  Fiddlerを使用しています。 <http://www.telerik.com/fiddler>
 艦これ 司令部室Light向け
   VisualPharmのアイコンを使用しています。 <http://www.visualpharm.com/>
