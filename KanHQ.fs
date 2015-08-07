@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.8.0"; AssemblyVersion "0.8.8.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.9.0"; AssemblyVersion "0.8.9.0">]
 #endif
 do
     let values = [|
@@ -1266,12 +1266,19 @@ let afterSessionComplete (oSession : Session) =
                                                                     |> Option.iter (fun idx -> if sid2 = -1.0 then remove shipids idx else shipids.[idx] <- JsonNumber sid2))
                            shipids.[if 0 < idx && getNumber shipids.[idx - 1] = -1.0 then idx - 1 else idx] <- JsonNumber sid1
             Mission.UpdateDecks()
-        | "/kcsapi/api_get_member/ship3" | "/kcsapi/api_get_member/ship_deck" ->
+        | "/kcsapi/api_get_member/ship3" ->
             let data = parseJson oSession |> get "api_data" |> getObject
             lock ships (fun () -> getArray data.["api_ship_data"] |> Array.iter (fun ship -> let ship = getObject ship in ships.[getNumber ship.["api_id"]] <- ship))
             Ship.UpdateShips()
             Slotitem.UpdateItems()
             mission "api_deck_data" data
+        | "/kcsapi/api_get_member/ship_deck" ->
+            let data = parseJson oSession |> get "api_data" |> getObject
+            lock ships (fun () -> getArray data.["api_ship_data"] |> Array.iter (fun ship -> let ship = getObject ship in ships.[getNumber ship.["api_id"]] <- ship))
+            Ship.UpdateShips()
+            Slotitem.UpdateItems()
+            // ignore api_deck_data because broken.
+            // mission "api_deck_data" data
         | "/kcsapi/api_req_nyukyo/start" ->         // 入渠命令
             let request = oSession.GetRequestBodyAsString() |> parseQuery
             if int request.["api_highspeed"] = 1 then
