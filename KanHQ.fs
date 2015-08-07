@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.9.0.0"; AssemblyVersion "0.9.0.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.9.1.0"; AssemblyVersion "0.9.1.0">]
 #endif
 do
     let values = [|
@@ -442,6 +442,7 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
         Mission(21, "北方鼠輸送作戦",        140, 15,  30, None,    [[3];          [2];          [2];          [2];     [2];        ], 3, 3,  55, 320, 270,   0,   0, 8, 7)
         Mission(22, "艦隊演習",              180, 30,  45, None,    [[5];          [3];          [2];          [2];     [];      [] ], 0, 0, 400,   0,  10,   0,   0, 8, 7)
         Mission(23, "航空戦艦運用演習",      240, 50, 200, None,    [[10];         [10];         [2];          [2];     [];      [] ], 0, 0, 420,   0,  20,   0, 100, 8, 8)
+        Mission(24, "北方航路海上護衛",      500, 50, 200, Some 3,  [[3];          [2];          [2];          [2];     [2];     [] ], 0, 0,  80, 500,   0,   0, 150, 8, 6)
         Mission(25, "通商破壊作戦",         2400, 25,   0, None,    [[5];          [5];          [2];          [2];                 ], 0, 0, 180, 900,   0, 500,   0, 5, 8)
         Mission(26, "敵母港空襲作戦",       4800, 30,   0, None,    [[7;11;16;18]; [3];          [2];          [2];                 ], 0, 0, 200,   0,   0,   0, 900, 8, 8)
         Mission(27, "潜水艦通商破壊作戦",   1200,  1,   0, None,    [[13;14];      [13;14];                                         ], 0, 0,  60,   0,   0, 800,   0, 8, 8)
@@ -449,12 +450,13 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
         Mission(29, "潜水艦派遣演習",       1440, 50,   0, None,    [[13;14];      [13;14];      [13;14];                           ], 0, 0, 100,   0,   0,   0, 100, 9, 4)
         Mission(30, "潜水艦派遣作戦",       2880, 55,   0, None,    [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0, 150,   0,   0,   0, 100, 9, 7)
         Mission(31, "海外艦との接触",        120, 60, 200, None,    [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0,  50,   0,  30,   0,   0, 5, 0)
-        Mission(32, "遠洋練習航海",         1440,  5,   0, Some 21, [[21];         [2];          [2];                               ], 0, 0, 300,  50,  50,  50,  50, 9, 3)
+        Mission(32, "遠洋練習航海",         1440,  5,   0, Some 21, [[21];         [2];          [2];                               ], 0, 0, 900,  50,  50,  50,  50, 9, 3)
         Mission(35, "MO作戦",                420, 40,   0, None,    [[7;11;16;18]; [7;11;16;18]; [5];          [2];     [];      [] ], 0, 0, 100,   0,   0, 240, 280, 8, 8)
         Mission(36, "水上機基地建設",        540, 30,   0, None,    [[16];         [16];         [3];          [2];     [];      [] ], 0, 0, 100, 480,   0, 200, 200, 8, 8)
-        Mission(37, "東京急行",              165, 50, 200, None,    [[3];          [2];          [2];          [2];     [2];     [2]], 4, 4,  65,   0, 380, 270,   0, 8, 8)
+        Mission(37, "東京急行",              165, 50, 200, None,    [[3];          [2];          [2];          [2];     [2];     [2]], 3, 4,  65,   0, 380, 270,   0, 8, 8)
         Mission(38, "東京急行(弐)",          175, 65, 240, None,    [[2];          [2];          [2];          [2];     [2];     [] ], 4, 8,  70, 420,   0, 200,   0, 8, 8)
         Mission(39, "遠洋潜水艦作戦",       1800,  3, 180, None,    [[20];         [13;14];      [13;14];      [13;14]; [13;14];    ], 0, 0, 160,   0,   0, 300,   0, 9, 9)
+        Mission(40, "水上機前線輸送",        410, 25, 150, Some 3,  [[3];          [16];         [16];         [2];     [2];     [] ], 0, 0,  70, 300, 300,   0, 100, 8, 7)
     |]
     static let bindingList = SortableBindingList missions
     static let mutable bindedForm = null
@@ -533,7 +535,7 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
         steel <- int (float getSteel * daihatsu)
         bauxite <- int (float getBauxite * daihatsu)
 
-let missionWindow = lazy(createForm 829 833 "艦これ 司令部室 - 遠征計画" (fun form ->
+let missionWindow = lazy(createForm 829 873 "艦これ 司令部室 - 遠征計画" (fun form ->
     let decks = [|
         new RadioButton(AutoSize = true, Location = Point( 13, 13), Text = "第2艦隊", UseVisualStyleBackColor = true, Checked = true)
         new RadioButton(AutoSize = true, Location = Point( 83, 13), Text = "第3艦隊", UseVisualStyleBackColor = true)
@@ -542,7 +544,7 @@ let missionWindow = lazy(createForm 829 833 "艦これ 司令部室 - 遠征計�
     decks |> Array.iteri (fun i rb -> rb.CheckedChanged.Add(fun _ -> if rb.Checked then Mission.UpdateIndex(i + 1)))
     let hourly = new CheckBox(Size = Size(48, 16), Location = Point(729, 13), Anchor = anchorTR, Text = "時給", UseVisualStyleBackColor = true)
     hourly.CheckedChanged.Add(fun _ -> Mission.UpdateHourly hourly.Checked)
-    let grid = new DataGridView(Size = Size(829, 798), Location = Point(0, 35), Anchor = (AnchorStyles.Top ||| AnchorStyles.Bottom ||| AnchorStyles.Left ||| AnchorStyles.Right),
+    let grid = new DataGridView(Size = Size(829, 838), Location = Point(0, 35), Anchor = (AnchorStyles.Top ||| AnchorStyles.Bottom ||| AnchorStyles.Left ||| AnchorStyles.Right),
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false,
                                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing)
                                 // , RowTemplate.Height = 21
