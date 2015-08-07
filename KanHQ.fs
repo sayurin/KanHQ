@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.7.0"; AssemblyVersion "0.8.7.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.8.0"; AssemblyVersion "0.8.8.0">]
 #endif
 do
     let values = [|
@@ -900,15 +900,17 @@ let mutable hqLevel = 0
 [<DllImport("User32.dll")>]
 extern bool FlashWindow(nativeint hWnd, bool bInvert);
 
-let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
+let browserWidth = 1040
+
+let mainWindow () = createForm (browserWidth + 181) 668 "艦これ 司令部室" (fun form ->
     form.Name <- "Main"
-    let questLabels = Array.init 6 (fun i -> new Label(Location = Point(980, i * 16 +  28), Anchor = anchorTR, AutoSize = true) :> Control)
-    let missionLabels = Array.init 3 (fun i -> new Label(Location = Point(980, i * 16 + 148), Anchor = anchorTR, AutoSize = true) :> Control)
-    let dockLabels    = Array.init 4 (fun i -> new Label(Location = Point(980, i * 16 + 220), Anchor = anchorTR, AutoSize = true) :> Control)
-    let kousyouLabels = Array.init 4 (fun i -> new Label(Location = Point(980, i * 16 + 308), Anchor = anchorTR, AutoSize = true) :> Control)
-    let deckLabel = new Label(Location = Point(970, 380), Anchor = anchorTR, AutoSize = true)
-    let shipLabels = Array.init 6 (fun i -> new GradationLabel(Location = Point(980, i * 16 + 396), Anchor = anchorTR, AutoSize = true, MinimumSize = Size(100, 0)))
-    let maxCountLabel = new Label(Location = Point(970, 500), Anchor = anchorTR, AutoSize = true)
+    let questLabels = Array.init 6 (fun i -> new Label(Location = Point(browserWidth + 20, i * 16 +  28), Anchor = anchorTR, AutoSize = true) :> Control)
+    let missionLabels = Array.init 3 (fun i -> new Label(Location = Point(browserWidth + 20, i * 16 + 148), Anchor = anchorTR, AutoSize = true) :> Control)
+    let dockLabels    = Array.init 4 (fun i -> new Label(Location = Point(browserWidth + 20, i * 16 + 220), Anchor = anchorTR, AutoSize = true) :> Control)
+    let kousyouLabels = Array.init 4 (fun i -> new Label(Location = Point(browserWidth + 20, i * 16 + 308), Anchor = anchorTR, AutoSize = true) :> Control)
+    let deckLabel = new Label(Location = Point(browserWidth + 10, 380), Anchor = anchorTR, AutoSize = true)
+    let shipLabels = Array.init 6 (fun i -> new GradationLabel(Location = Point(browserWidth + 20, i * 16 + 396), Anchor = anchorTR, AutoSize = true, MinimumSize = Size(100, 0)))
+    let maxCountLabel = new Label(Location = Point(browserWidth + 10, 500), Anchor = anchorTR, AutoSize = true)
     let clock = ref true
     Seq.concat [ missionLabels; dockLabels; kousyouLabels ] |> Seq.iter (fun c -> c.Click.Add(fun _ -> clock := not !clock))
     let deckIndex = ref 0
@@ -963,12 +965,12 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
                               sprintf "保有数: %d / %d,  %d / %d" ships.Count maxShip slotitems.Count maxSlotitem
     )
 
-    let webBrowser = new WebBrowser2(Location = Point(0, 0), Size = Size(960, 668), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right),
+    let webBrowser = new WebBrowser2(Location = Point(0, 0), Size = Size(browserWidth, 668), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right),
                                      ScriptErrorsSuppressed = true, Url = Uri "http://www.dmm.com/netgame/social/-/gadgets/=/app_id=854854/")
-    let mute       = new MuteCheckBox(Location = Point(970, 524), Anchor = anchorTR, Text = "消音", UseVisualStyleBackColor = true)
-    let screenShot = new Button(Location = Point(970, 548), Anchor = anchorTR, Text = "画像保存")
+    let mute       = new MuteCheckBox(Location = Point(browserWidth + 10, 524), Anchor = anchorTR, Text = "消音", UseVisualStyleBackColor = true)
+    let screenShot = new Button(Location = Point(browserWidth + 10, 548), Anchor = anchorTR, Text = "画像保存")
     let resize _ =
-        100 * webBrowser.Width / 960 |> zoom webBrowser
+        100 * webBrowser.Width / browserWidth |> zoom webBrowser
     webBrowser.Resize.Add resize
     webBrowser.Navigated.Add resize
     webBrowser.NewWindow3.Add(fun e ->
@@ -979,10 +981,10 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
             e.ppDisp <- webBrowser.GetApplication())
         form.Show())
     screenShot.Click.Add(fun _ -> saveImage webBrowser)
-    let tweet = new Button(Location = Point(1051, 548), Anchor = anchorTR, Text = "呟く")
+    let tweet = new Button(Location = Point(browserWidth + 91, 548), Anchor = anchorTR, Text = "呟く")
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
 
-    let capture = new Button(Location = Point(970, 576), Anchor = anchorTR, Text = "動画保存", Enabled = captureSupported)
+    let capture = new Button(Location = Point(browserWidth + 10, 576), Anchor = anchorTR, Text = "動画保存", Enabled = captureSupported)
     capture.Click.Add(let state = ref None in fun _ ->
         match !state with
         | None ->
@@ -1010,7 +1012,7 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
             } |> Async.StartImmediate
     )
 
-    let clear = new Button(Location = Point(1051, 576), Anchor = anchorTR, Text = "クリア")
+    let clear = new Button(Location = Point(browserWidth + 91, 576), Anchor = anchorTR, Text = "クリア")
     clear.Click.Add(fun _ ->
         let result = MessageBox.Show("艦これ 司令部室を終了し、Internet Explorer のインターネット一時ファイル\r\n（キャッシュ）を削除します。よろしいですか？", "艦これ 司令部室",
                                      MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation, MessageBoxDefaultButton.Button2)
@@ -1018,27 +1020,27 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
             Process.Start("rundll32", "inetcpl.cpl,ClearMyTracksByProcess 8") |> ignore
             form.Close())
 
-    let mission = new Button(Location = Point(970, 604), Anchor = anchorTR, Text = "遠征計画")
+    let mission = new Button(Location = Point(browserWidth + 10, 604), Anchor = anchorTR, Text = "遠征計画")
     mission.Click.Add(fun _ ->
         let form = missionWindow.Force()
         form.Show()
         form.Activate())
-    let shiplist = new Button(Location = Point(1051, 604), Anchor = anchorTR, Text = "艦娘一覧")
+    let shiplist = new Button(Location = Point(browserWidth + 91, 604), Anchor = anchorTR, Text = "艦娘一覧")
     shiplist.Click.Add(fun _ ->
         let form = shipWindow.Force()
         form.Show()
         form.Activate())
 
-    let panel = new Panel(Location = Point(0, 0), Size = Size(1200, 668), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right), MaximumSize = Size(1200, 10000))
+    let panel = new Panel(Location = Point(0, 0), Size = Size(browserWidth + 240, 668), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right), MaximumSize = Size(browserWidth + 240, 10000))
     panel.SuspendLayout()
     panel.Controls.Add webBrowser
-    panel.Controls.Add(new Label(Location = Point(970,  12), Anchor = anchorTR, AutoSize = true, Text = "任務："))
+    panel.Controls.Add(new Label(Location = Point(browserWidth + 10,  12), Anchor = anchorTR, AutoSize = true, Text = "任務："))
     panel.Controls.AddRange questLabels
-    panel.Controls.Add(new Label(Location = Point(970, 132), Anchor = anchorTR, AutoSize = true, Text = "遠征："))
+    panel.Controls.Add(new Label(Location = Point(browserWidth + 10, 132), Anchor = anchorTR, AutoSize = true, Text = "遠征："))
     panel.Controls.AddRange missionLabels
-    panel.Controls.Add(new Label(Location = Point(970, 204), Anchor = anchorTR, AutoSize = true, Text = "入渠："))
+    panel.Controls.Add(new Label(Location = Point(browserWidth + 10, 204), Anchor = anchorTR, AutoSize = true, Text = "入渠："))
     panel.Controls.AddRange dockLabels
-    panel.Controls.Add(new Label(Location = Point(970, 292), Anchor = anchorTR, AutoSize = true, Text = "建造："))
+    panel.Controls.Add(new Label(Location = Point(browserWidth + 10, 292), Anchor = anchorTR, AutoSize = true, Text = "建造："))
     panel.Controls.AddRange kousyouLabels
     panel.Controls.Add deckLabel
     Array.iter panel.Controls.Add shipLabels
@@ -1264,7 +1266,7 @@ let afterSessionComplete (oSession : Session) =
                                                                     |> Option.iter (fun idx -> if sid2 = -1.0 then remove shipids idx else shipids.[idx] <- JsonNumber sid2))
                            shipids.[if 0 < idx && getNumber shipids.[idx - 1] = -1.0 then idx - 1 else idx] <- JsonNumber sid1
             Mission.UpdateDecks()
-        | "/kcsapi/api_get_member/ship3" ->         // 装備変更後に取得している。
+        | "/kcsapi/api_get_member/ship3" | "/kcsapi/api_get_member/ship_deck" ->
             let data = parseJson oSession |> get "api_data" |> getObject
             lock ships (fun () -> getArray data.["api_ship_data"] |> Array.iter (fun ship -> let ship = getObject ship in ships.[getNumber ship.["api_id"]] <- ship))
             Ship.UpdateShips()
