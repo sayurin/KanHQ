@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.9.1.0"; AssemblyVersion "0.9.1.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.9.2.0"; AssemblyVersion "0.9.2.0">]
 #endif
 do
     let values = [|
@@ -289,21 +289,25 @@ let configCapture () =
         let audioCodec = new ComboBox(Location = Point(347, 84), Size = Size(121, 20), DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = "Item1", BindingContext = BindingContext())
         form.Controls.Add audioCodec
         let fileFormatChanged _ =
-            let (_ : string), (videos : (string * Guid)[], audios : (string * Guid)[]) = downcast fileFormat.SelectedItem
+            let (_ : string), (videos : (string * Guid * Guid)[], audios : (string * Guid * Guid)[]) = downcast fileFormat.SelectedItem
             videoCodec.DataSource <- videos
-            videoCodec.SelectedIndex <- let index = Array.tryFindIndex (fun (_, guid) -> guid.ToString() = Settings.Default.VideoCodec) videos
+            videoCodec.SelectedIndex <- let index = Array.tryFindIndex (fun (_, guid, _) -> guid.ToString() = Settings.Default.VideoCodec) videos
                                         defaultArg index 0
             audioCodec.DataSource <- audios
-            audioCodec.SelectedIndex <- let index = Array.tryFindIndex (fun (_, guid) -> guid.ToString() = Settings.Default.AudioCodec) audios
+            audioCodec.SelectedIndex <- let index = Array.tryFindIndex (fun (_, guid, _) -> guid.ToString() = Settings.Default.AudioCodec) audios
                                         defaultArg index 0
         fileFormat.SelectedIndexChanged.Add fileFormatChanged
         let ok = new Button(Location = Point(318, 139), Size = Size(75, 23), UseVisualStyleBackColor = true, Text = "OK", DialogResult = DialogResult.OK)
         ok.Click.Add(fun _ ->
             Settings.Default.VideoFolder <- folder.Text
-            Settings.Default.Extension <- let (extension : string), (_ : (string * Guid)[] * (string * Guid)[]) = downcast fileFormat.SelectedItem in extension
-            Settings.Default.VideoCodec <- let (_ : string), (guid : Guid) = downcast videoCodec.SelectedValue in guid.ToString()
+            Settings.Default.Extension <- let (extension : string), (_ : (string * Guid * Guid)[] * (string * Guid * Guid)[]) = downcast fileFormat.SelectedItem in extension
+            let (_ : string), (videoCodec : Guid), (videoFormat : Guid) = downcast videoCodec.SelectedValue
+            Settings.Default.VideoFormat <- videoFormat.ToString()
+            Settings.Default.VideoCodec <- videoCodec.ToString()
             Settings.Default.FrameRate <- int videoFrameRate.Value
-            Settings.Default.AudioCodec <- let (_ : string), (guid : Guid) = downcast audioCodec.SelectedValue in guid.ToString()
+            let (_ : string), (audioCodec : Guid), (audioFormat : Guid) = downcast audioCodec.SelectedValue
+            Settings.Default.AudioFormat <- audioFormat.ToString()
+            Settings.Default.AudioCodec <- audioCodec.ToString()
             Settings.Default.Save())
         form.Controls.Add ok
         fileFormat.SelectedIndex <- let index = Array.tryFindIndex (fun (extension, _) -> String.Equals(extension, Settings.Default.Extension, StringComparison.OrdinalIgnoreCase)) config

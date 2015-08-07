@@ -466,7 +466,7 @@ extern void private MFCreateMediaType([<Out>] IMFMediaType& ppMFType);
 [<DllImport("Mfplat.dll", PreserveSig = false)>]
 extern void private MFCreateAlignedMemoryBuffer(uint32 cbMaxLength, uint32 fAlignmentFlags, [<Out>] IMFMediaBuffer& ppBuffer);
 [<DllImport("Evr.dll", PreserveSig = false)>]
-extern void private MFCreateDXSurfaceBuffer([<MarshalAs(UnmanagedType.LPStruct)>] Guid riid, [<MarshalAs(UnmanagedType.IUnknown)>] obj punkSurface, bool fBottomUpWhenLinear, [<Out>] IMFMediaBuffer& ppBuffer);
+extern void private MFCreateDXSurfaceBuffer([<MarshalAs(UnmanagedType.LPStruct)>] Guid riid, nativeint punkSurface, bool fBottomUpWhenLinear, [<Out>] IMFMediaBuffer& ppBuffer);
 [<DllImport((*"Mfplat.dll"*)"Evr.dll", PreserveSig = false)>]
 extern void private MFCopyImage(nativeint pDest, (*int*)uint32 lDestStride, nativeint pSrc, (*int*)uint32 lSrcStride, uint32 dwWidthInBytes, uint32 dwLines);
 [<DllImport("Mfplat.dll", PreserveSig = false)>]
@@ -532,9 +532,12 @@ let private MFMediaType_Video                       = Guid "73646976-0000-0010-8
 let private MFMediaType_Audio                       = Guid "73647561-0000-0010-8000-00AA00389B71"
 let private MFVideoFormat_WMV3                      = Guid "33564D57-0000-0010-8000-00AA00389B71"
 let private MFVideoFormat_H264                      = Guid "34363248-0000-0010-8000-00AA00389B71"
+let private MFVideoFormat_HEVC                      = Guid "43564548-0000-0010-8000-00AA00389B71"
 let private MFVideoFormat_RGB32                     = Guid "00000016-0000-0010-8000-00AA00389B71"
 let private MFAudioFormat_WMAudioV9                 = Guid "00000162-0000-0010-8000-00AA00389B71"
+let private MFAudioFormat_MP3                       = Guid "00000055-0000-0010-8000-00AA00389B71"
 let private MFAudioFormat_AAC                       = Guid "00001610-0000-0010-8000-00AA00389B71"
+let private MFAudioFormat_Dolby_AC3                 = Guid "E06D802C-DB46-11CF-B4D1-00805F6CBBEA"
 let private AM_MEDIA_TYPE_REPRESENTATION            = Guid "E2E42AD2-132C-491E-A268-3C7C2DCA181F"
 let private MFVideoInterlace_Progressive = 2u
 let private MF_SINK_WRITER_ALL_STREAMS = 0xFFFFFFFEu
@@ -615,15 +618,16 @@ open Sayuri.FSharp.Local
 
 [<DllImport("Kernel32.dll", CharSet = CharSet.Unicode)>]
 extern nativeint private LoadLibrary(string lpFileName);
-type Callback = delegate of qpc : int64 * [<MarshalAs(UnmanagedType.IUnknown)>] surface : obj -> unit
+type Callback = delegate of qpc : int64 * surface : nativeint -> unit
 [<DllImport("d3d9.dll")>]
-extern void private GetParameter([<Out>] uint32& width, [<Out>] uint32& height, [<Out>] D3DFORMAT& format, [<Out>] uint32& fps);
+extern void private GetParameter([<Out>] uint32& width, [<Out>] uint32& height, [<Out>] Guid& format, [<Out>] uint32& fps);
 [<DllImport("d3d9.dll")>]
 extern void private Start(Callback callback);
 [<DllImport("d3d9.dll")>]
 extern void private Stop();
 
-let table = dict [ "wmv", (MFVideoFormat_WMV3, MFAudioFormat_WMAudioV9); "mp4", (MFVideoFormat_H264, MFAudioFormat_AAC) ]
+let table = dict [ "wmv", ([|MFVideoFormat_WMV3|], [|MFAudioFormat_WMAudioV9|]);
+                   "mp4", ([|MFVideoFormat_H264; MFVideoFormat_HEVC|], [|MFAudioFormat_AAC; MFAudioFormat_Dolby_AC3; MFAudioFormat_MP3|]) ]
 
 let private enumMFT category outputType =
     let mutable ppMFTActivate = 0n
@@ -677,18 +681,18 @@ let configList () =
             let friendlyName = Marshal.PtrToStringUni friendlyNamePtr
             Marshal.FreeCoTaskMem friendlyNamePtr
             let clsid = activate.GetGUID(MFT_TRANSFORM_CLSID_Attribute)
-            friendlyName, clsid)
-    [| for KeyValue (key, (video, audio)) in table -> 
-        let video = MFT_REGISTER_TYPE_INFO(MFMediaType_Video, video) |> encoders MFT_CATEGORY_VIDEO_ENCODER
-        let audio = MFT_REGISTER_TYPE_INFO(MFMediaType_Audio, audio) |> encoders MFT_CATEGORY_AUDIO_ENCODER
+            friendlyName, clsid, outputType.guidSubtype)
+    [| for KeyValue (key, (videos, audios)) in table -> 
+        let video = Array.collect (fun video -> MFT_REGISTER_TYPE_INFO(MFMediaType_Video, video) |> encoders MFT_CATEGORY_VIDEO_ENCODER) videos
+        let audio = Array.collect (fun audio -> MFT_REGISTER_TYPE_INFO(MFMediaType_Audio, audio) |> encoders MFT_CATEGORY_AUDIO_ENCODER) audios
         key, (video, audio) |]
 
 let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventWaitHandle) =
     async{
         let extension, videoFormat, audioFormat =
-            match Settings.Default.Extension.ToLowerInvariant() |> table.TryGetValue with
-            | true, (video, audio) -> Settings.Default.Extension, video, audio
-            | false, _             -> "wmv", MFVideoFormat_WMV3, MFAudioFormat_WMAudioV9
+            if table.ContainsKey Settings.Default.Extension && Settings.Default.VideoFormat <> "" && Settings.Default.AudioFormat <> ""
+                then Settings.Default.Extension, Guid Settings.Default.VideoFormat, Guid Settings.Default.AudioFormat
+                else "wmv",                      MFVideoFormat_WMV3,                MFAudioFormat_WMAudioV9
         use _ = resource (fun () -> MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)) MFShutdown
         use _ = new MFTransformClassFactory(MFMediaType_Video, videoFormat, Settings.Default.VideoCodec)
         use _ = new MFTransformClassFactory(MFMediaType_Audio, audioFormat, Settings.Default.AudioCodec)
@@ -725,7 +729,7 @@ let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventW
             buffer.SetCurrentLength(length)
             sample.AddBuffer(buffer)
 
-        let initializeVideo width height fps =
+        let initializeVideo width height fps subtype =
             let mediaType = createMediaType ()
             mediaType.SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)
             mediaType.SetGUID(MF_MT_SUBTYPE, videoFormat)
@@ -739,7 +743,7 @@ let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventW
             let videoIndex = sinkWriter.AddStream(mediaType)
             let mediaType = createMediaType ()
             mediaType.SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)
-            mediaType.SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)
+            mediaType.SetGUID(MF_MT_SUBTYPE, subtype)
             MFSetAttributeSize(mediaType, MF_MT_FRAME_SIZE, width, height)
             mediaType.SetUINT32(MF_MT_DEFAULT_STRIDE, width * 4u)
             MFSetAttributeRatio(mediaType, MF_MT_FRAME_RATE, fps, 1u)
@@ -798,10 +802,10 @@ let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventW
         let videoStart, videoStop =
             if Settings.Default.FrameRate = 0 then
                 // use Direct3D
-                let mutable width, height, format, fps = 0u, 0u, D3DFORMAT.UNKNOWN, 0u
-                GetParameter(&width, &height, &format, &fps)
+                let mutable width, height, subtype, fps = 0u, 0u, Guid.Empty, 0u
+                GetParameter(&width, &height, &subtype, &fps)
                 let width, height = width, height
-                let videoIndex = initializeVideo width height fps
+                let videoIndex = initializeVideo width height fps subtype
                 let callback = Callback(fun timestamp obj ->
                     if !startTimestamp = 0L then startTimestamp := timestamp
                     let videoSample = timestamp - !startTimestamp |> createSample
@@ -827,7 +831,7 @@ let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventW
                     (xh * TimeSpan.TicksPerSecond / Stopwatch.Frequency <<< 32) + ((xh * TimeSpan.TicksPerSecond % Stopwatch.Frequency <<< 32) + xl * TimeSpan.TicksPerSecond) / Stopwatch.Frequency
                 let width = uint32 size.Width
                 let height = uint32 size.Height
-                let videoIndex = initializeVideo width height (uint32 Settings.Default.FrameRate)
+                let videoIndex = initializeVideo width height (uint32 Settings.Default.FrameRate) MFVideoFormat_RGB32
                 let videoTimer = new Timer(Interval = 1000 / Settings.Default.FrameRate)
                 videoTimer.Tick.Add(fun _ ->
                     let timestamp = Stopwatch.GetTimestamp() |> hns

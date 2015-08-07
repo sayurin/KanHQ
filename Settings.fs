@@ -56,6 +56,11 @@ type Settings () =
         and set (value : string) = this.["Extension"] <- value 
 
     [<UserScopedSetting>]
+    member this.VideoFormat
+        with get () = this.["VideoFormat"] :?> string
+        and set (value : string) = this.["VideoFormat"] <- value 
+
+    [<UserScopedSetting>]
     member this.VideoCodec
         with get () = this.["VideoCodec"] :?> string
         and set (value : string) = this.["VideoCodec"] <- value 
@@ -64,6 +69,11 @@ type Settings () =
     member this.FrameRate
         with get () = this.["FrameRate"] :?> int
         and set (value : int) = this.["FrameRate"] <- value 
+
+    [<UserScopedSetting>]
+    member this.AudioFormat
+        with get () = this.["AudioFormat"] :?> string
+        and set (value : string) = this.["AudioFormat"] <- value 
 
     [<UserScopedSetting>]
     member this.AudioCodec

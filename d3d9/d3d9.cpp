@@ -7,10 +7,50 @@
 #include <crtdbg.h>						// for _ASSERTE
 #include <Ks.h>							// for NANOSECONDS, KSCONVERT_PERFORMANCE_TIME
 #include <Shlwapi.h>					// for PathAppend
+#include <atomic>
 #include <type_traits>					// for std::remove_pointer_t
 #pragma comment(lib, "Shlwapi.lib")
 
+#pragma region =include <d3d9.h>
+#define Direct3DCreate9Ex BrokenDirect3DCreate9Ex
+#define IDirect3D9Ex      BrokenIDirect3D9Ex
+#define IDirect3D9ExVtbl  BrokenIDirect3D9ExVtbl
 #include <d3d9.h>
+#undef Direct3DCreate9Ex
+#undef IDirect3D9Ex
+#undef IDirect3D9ExVtbl
+
+// copy from d3d9.h, and add missing IDirect3D9::RegisterSoftwareDevice().
+#undef INTERFACE
+#define INTERFACE IDirect3D9Ex
+DECLARE_INTERFACE_(IDirect3D9Ex, IDirect3D9) {
+	/*** IUnknown methods ***/
+	STDMETHOD(QueryInterface)(THIS_ REFIID riid, void** ppvObj) PURE;
+	STDMETHOD_(ULONG, AddRef)(THIS) PURE;
+	STDMETHOD_(ULONG, Release)(THIS) PURE;
+
+	/*** IDirect3D9 methods ***/
+	STDMETHOD(RegisterSoftwareDevice)(THIS_ void* pInitializeFunction) PURE;
+	STDMETHOD_(UINT, GetAdapterCount)(THIS) PURE;
+	STDMETHOD(GetAdapterIdentifier)(THIS_ UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER9* pIdentifier) PURE;
+	STDMETHOD_(UINT, GetAdapterModeCount)(THIS_ UINT Adapter, D3DFORMAT Format) PURE;
+	STDMETHOD(EnumAdapterModes)(THIS_ UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) PURE;
+	STDMETHOD(GetAdapterDisplayMode)(THIS_ UINT Adapter, D3DDISPLAYMODE* pMode) PURE;
+	STDMETHOD(CheckDeviceType)(THIS_ UINT Adapter, D3DDEVTYPE DevType, D3DFORMAT AdapterFormat, D3DFORMAT BackBufferFormat, BOOL bWindowed) PURE;
+	STDMETHOD(CheckDeviceFormat)(THIS_ UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT AdapterFormat, DWORD Usage, D3DRESOURCETYPE RType, D3DFORMAT CheckFormat) PURE;
+	STDMETHOD(CheckDeviceMultiSampleType)(THIS_ UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT SurfaceFormat, BOOL Windowed, D3DMULTISAMPLE_TYPE MultiSampleType, DWORD* pQualityLevels) PURE;
+	STDMETHOD(CheckDepthStencilMatch)(THIS_ UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT AdapterFormat, D3DFORMAT RenderTargetFormat, D3DFORMAT DepthStencilFormat) PURE;
+	STDMETHOD(CheckDeviceFormatConversion)(THIS_ UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT SourceFormat, D3DFORMAT TargetFormat) PURE;
+	STDMETHOD(GetDeviceCaps)(THIS_ UINT Adapter, D3DDEVTYPE DeviceType, D3DCAPS9* pCaps) PURE;
+	STDMETHOD_(HMONITOR, GetAdapterMonitor)(THIS_ UINT Adapter) PURE;
+	STDMETHOD(CreateDevice)(THIS_ UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice9** ppReturnedDeviceInterface) PURE;
+	STDMETHOD_(UINT, GetAdapterModeCountEx)(THIS_ UINT Adapter, CONST D3DDISPLAYMODEFILTER* pFilter) PURE;
+	STDMETHOD(EnumAdapterModesEx)(THIS_ UINT Adapter, CONST D3DDISPLAYMODEFILTER* pFilter, UINT Mode, D3DDISPLAYMODEEX* pMode) PURE;
+	STDMETHOD(GetAdapterDisplayModeEx)(THIS_ UINT Adapter, D3DDISPLAYMODEEX* pMode, D3DDISPLAYROTATION* pRotation) PURE;
+	STDMETHOD(CreateDeviceEx)(THIS_ UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode, IDirect3DDevice9Ex** ppReturnedDeviceInterface) PURE;
+	STDMETHOD(GetAdapterLUID)(THIS_ UINT Adapter, LUID * pLUID) PURE;
+};
+#pragma endregion
 static_assert(sizeof IDirect3D9Vtbl == offsetof(IDirect3D9ExVtbl, GetAdapterModeCountEx), "old IDirect3D9Ex does not have IDirect3D9::RegisterSoftwareDevice().");
 
 template<typename Interface>
@@ -59,7 +99,8 @@ void unhook(Func& target, Func& backup, Func hook) {
 }
 #define UNHOOK(INTERFACE, PTR, MEMBER) unhook<decltype(vtable_t<INTERFACE>::MEMBER)>(PTR->lpVtbl->MEMBER, INTERFACE ## _ ## MEMBER ## _Orig, INTERFACE ## _ ## MEMBER ## _Hook)
 
-void (STDMETHODCALLTYPE *Frame)(ULONGLONG, IDirect3DSurface9*) = nullptr;
+typedef void (STDMETHODCALLTYPE *FramePtr)(ULONGLONG, void*);
+std::atomic<FramePtr> Frame = nullptr;
 D3DSURFACE_DESC desc;
 auto frequency = []() {
 	LARGE_INTEGER frequency;
@@ -67,6 +108,14 @@ auto frequency = []() {
 	return static_cast<ULONGLONG>(frequency.QuadPart);
 }();
 unsigned fps;
+
+void check(const TCHAR* method, HRESULT result) {
+	if (FAILED(result)) {
+		TCHAR buffer[1024];
+		wsprintf(buffer, TEXT("%s() failed: %08X\n"), method, result);
+		OutputDebugString(buffer);
+	}
+}
 
 decltype(vtable_t<IDirect3DDevice9>::EndScene) IDirect3DDevice9_EndScene_Orig = nullptr;
 HRESULT STDMETHODCALLTYPE IDirect3DDevice9_EndScene_Hook(IDirect3DDevice9* This) {
@@ -81,25 +130,37 @@ HRESULT STDMETHODCALLTYPE IDirect3DDevice9_EndScene_Hook(IDirect3DDevice9* This)
 		IDirect3DDevice9_GetRenderTarget(This, 0, &renderTarget);
 		IDirect3DSurface9_GetDesc(renderTarget, &desc);
 		IDirect3DSurface9_Release(renderTarget);
+
 		// quick hack, first 'ticks - start' is 1.
 		return ticks++;
 	}();
 	fps = static_cast<unsigned>(static_cast<ULONGLONG>(++count) * NANOSECONDS / (ticks - start));
 
-	auto result = IDirect3DDevice9_EndScene_Orig(This);
-	auto frame = Frame;
+	FramePtr frame = Frame;
 	if (frame) {
-		IDirect3DSurface9* renderTarget;
-		IDirect3DDevice9_GetRenderTarget(This, 0, &renderTarget);
 		IDirect3DSurface9* offsecreen;
-		IDirect3DDevice9_CreateOffscreenPlainSurface(This, desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &offsecreen, nullptr);
-		IDirect3DDevice9_GetRenderTargetData(This, renderTarget, offsecreen);
-		IDirect3DSurface9_Release(renderTarget);
+		check(TEXT("CreateOffscreenPlainSurface"), IDirect3DDevice9_CreateOffscreenPlainSurface(This, desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &offsecreen, nullptr));
+		{
+			IDirect3DSurface9* target;
+			check(TEXT("GetRenderTarget"), IDirect3DDevice9_GetRenderTarget(This, 0, &target));
+#if 0
+			if (desc.MultiSampleType != D3DMULTISAMPLE_NONE) {
+				IDirect3DSurface9* resolved;
+				check(TEXT("CreateRenderTarget"), IDirect3DDevice9_CreateRenderTarget(This, desc.Width, desc.Height, desc.Format, D3DMULTISAMPLE_NONE, 0, false, &resolved, nullptr));
+				check(TEXT("StretchRect"), IDirect3DDevice9_StretchRect(This, target, nullptr, resolved, nullptr, D3DTEXF_NONE));
+				IDirect3DSurface9_Release(target);
+				target = resolved;
+			}
+#endif
+			check(TEXT("GetRenderTargetData"), IDirect3DDevice9_GetRenderTargetData(This, target, offsecreen));
+			IDirect3DSurface9_Release(target);
+		}
 		frame(ticks, offsecreen);
 		IDirect3DSurface9_Release(offsecreen);
 	}
-	return result;
+	return IDirect3DDevice9_EndScene_Orig(This);
 }
+
 decltype(vtable_t<IDirect3DDevice9>::Release) IDirect3DDevice9_Release_Orig = nullptr;
 ULONG STDMETHODCALLTYPE IDirect3DDevice9_Release_Hook(IDirect3DDevice9* This) {
 	auto count = IDirect3DDevice9_Release_Orig(This);
@@ -156,14 +217,21 @@ ULONG STDMETHODCALLTYPE IDirect3D9Ex_Release_Hook(IDirect3D9Ex* This) {
 	return count;
 }
 
-void STDMETHODCALLTYPE GetParameter(UINT* width, UINT* height, D3DFORMAT* format, unsigned* fps) {
+void STDMETHODCALLTYPE GetParameter(UINT* width, UINT* height, GUID* subtype, unsigned* fps) {
 	*width = desc.Width;
 	*height = desc.Height;
-	*format = desc.Format;
+	// https://msdn.microsoft.com/en-us/library/aa370819(v=vs.85).aspx#Creating_Subtype_GUIDs_from_FOURCCs_and_D3DFORMAT_Values
+	*subtype = { unsigned long(desc.Format), 0x0000, 0x0010, { 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
 	*fps = ::fps;
+#ifdef _DEBUG
+	TCHAR buffer[1024];
+	wsprintf(buffer, TEXT("GetParameter: format=%u, type=%u, usage=%u, pool=%u, sampletype=%u, samplequality=%u, width=%u, height=%u, fps = %u\n"),
+		desc.Format, desc.Type, desc.Usage, desc.Pool, desc.MultiSampleType, desc.MultiSampleQuality, desc.Width, desc.Height, ::fps);
+	OutputDebugString(buffer);
+#endif
 }
 
-void STDMETHODCALLTYPE Start(decltype(Frame) frame) {
+void STDMETHODCALLTYPE Start(FramePtr frame) {
 	Frame = frame;
 }
 
