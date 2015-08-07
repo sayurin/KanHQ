@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.6.0"; AssemblyVersion "0.8.6.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "0.8.7.0"; AssemblyVersion "0.8.7.0">]
 #endif
 do
     let values = [|
@@ -415,45 +415,46 @@ type Result =
     | Success
     | GreatSuccess
 
-type Mission (index : int, name : string, duration : int, flagshipLevel : int, totalLevel : int, condition : int list list, drumShips : int, drumCount : int,
+type Mission (index : int, name : string, duration : int, flagshipLevel : int, totalLevel : int, flagshipCondition : int option, condition : int list list, drumShips : int, drumCount : int,
               exp : int, getFuel : int, getBullet : int, getSteel : int, getBauxite : int, useFuel : int, useBullet : int) =
-    static let stypes = dict [[], "任意"; [2], "駆"; [3], "軽"; [5], "重"; [7;11;16;18], "空母"; [10], "航戦"; [13;14], "潜"; [16], "水母"; [20], "潜母"]
+    static let stypes = dict [[], "任意"; [2], "駆"; [3], "軽"; [5], "重"; [7;11;16;18], "空母"; [10], "航戦"; [13;14], "潜"; [16], "水母"; [20], "潜母"; [21], "練巡"]
     static let missions = [|
-        Mission( 1, "練習航海",               15,  1,   0, [[];           [];                                              ], 0, 0,  10,   0,  30,   0,   0, 3, 0)
-        Mission( 2, "長距離練習航海",         30,  2,   0, [[];           [];           [];           [];                  ], 0, 0,  15,   0, 100,  30,   0, 5, 0)
-        Mission( 3, "警備任務",               20,  3,   0, [[];           [];           [];                                ], 0, 0,  30,  30,  30,  40,   0, 3, 2)
-        Mission( 4, "対潜警戒任務",           50,  3,   0, [[3];          [2];          [2];                               ], 0, 0,  40,   0,  60,   0,   0, 5, 0)
-        Mission( 5, "海上護衛任務",           90,  3,   0, [[3];          [2];          [2];          [];                  ], 0, 0,  40, 200, 200,  20,  20, 5, 0)
-        Mission( 6, "防空射撃演習",           40,  4,   0, [[];           [];           [];           [];                  ], 0, 0,  50,   0,   0,   0,  80, 3, 2)
-        Mission( 7, "観艦式予行",             60,  5,   0, [[];           [];           [];           [];      [];      [] ], 0, 0, 120,   0,   0,  50,  30, 5, 0)
-        Mission( 8, "観艦式",                180,  6,   0, [[];           [];           [];           [];      [];      [] ], 0, 0, 140,  50, 100,  50,  50, 5, 2)
-        Mission( 9, "タンカー護衛任務",      240,  3,   0, [[3];          [2];          [2];          [];                  ], 0, 0,  60, 350,   0,   0,   0, 5, 0)
-        Mission(10, "強行偵察任務",           90,  3,   0, [[3];          [3];          [];                                ], 0, 0,  50,   0,  50,   0,  30, 3, 0)
-        Mission(11, "ボーキサイト輸送任務",  300,  6,   0, [[2];          [2];          [];           [];                  ], 0, 0,  40,   0,   0,   0, 250, 5, 0)
-        Mission(12, "資源輸送任務",          480,  4,   0, [[2];          [2];          [];           [];                  ], 0, 0,  50,  50, 250, 200,  50, 5, 0)
-        Mission(13, "鼠輸送作戦",            240,  5,   0, [[3];          [2];          [2];          [2];     [2];     [] ], 0, 0,  60, 240, 300,   0,   0, 5, 4)
-        Mission(14, "包囲陸戦隊撤収作戦",    360,  6,   0, [[3];          [2];          [2];          [2];     [];      [] ], 0, 0, 100,   0, 240, 200,   0, 5, 0)
-        Mission(15, "囮機動部隊支援作戦",    720,  8,   0, [[7;11;16;18]; [7;11;16;18]; [2];          [2];     [];      [] ], 0, 0, 160,   0,   0, 300, 400, 5, 4)
-        Mission(16, "艦隊決戦援護作戦",      900, 10,   0, [[3];          [2];          [2];          [];      [];      [] ], 0, 0, 200, 500, 500, 200, 200, 5, 4)
-        Mission(17, "敵地偵察作戦",           45, 20,   0, [[3];          [2];          [2];          [2];     [];      [] ], 0, 0,  40,  70,  70,  50,   0, 3, 4)
-        Mission(18, "航空機輸送作戦",        300, 15,   0, [[7;11;16;18]; [7;11;16;18]; [7;11;16;18]; [2];     [2];     [] ], 0, 0,  60,   0,   0, 300, 100, 5, 2)
-        Mission(19, "北号作戦",              360, 20,   0, [[10];         [10];         [2];          [2];     [];      [] ], 0, 0,  70, 400,   0,  50,  30, 5, 4)
-        Mission(20, "潜水艦哨戒任務",        120,  1,   0, [[13;14];      [3];                                             ], 0, 0,  50,   0,   0, 150,   0, 5, 4)
-        Mission(21, "北方鼠輸送作戦",        140, 15,  30, [[3];          [2];          [2];          [2];     [2];        ], 3, 3,  55, 320, 270,   0,   0, 8, 7)
-        Mission(22, "艦隊演習",              180, 30,  45, [[5];          [3];          [2];          [2];     [];      [] ], 0, 0, 400,   0,  10,   0,   0, 8, 7)
-        Mission(23, "航空戦艦運用演習",      240, 50, 200, [[10];         [10];         [2];          [2];     [];      [] ], 0, 0, 420,   0,  20,   0, 100, 8, 8)
-        Mission(25, "通商破壊作戦",         2400, 25,   0, [[5];          [5];          [2];          [2];                 ], 0, 0, 180, 900,   0, 500,   0, 5, 8)
-        Mission(26, "敵母港空襲作戦",       4800, 30,   0, [[7;11;16;18]; [3];          [2];          [2];                 ], 0, 0, 200,   0,   0,   0, 900, 8, 8)
-        Mission(27, "潜水艦通商破壊作戦",   1200,  1,   0, [[13;14];      [13;14];                                         ], 0, 0,  60,   0,   0, 800,   0, 8, 8)
-        Mission(28, "西方海域封鎖作戦",     1500, 30,   0, [[13;14];      [13;14];      [13;14];                           ], 0, 0, 140,   0,   0, 900, 350, 8, 8)
-        Mission(29, "潜水艦派遣演習",       1440, 50,   0, [[13;14];      [13;14];      [13;14];                           ], 0, 0, 100,   0,   0,   0, 100, 9, 4)
-        Mission(30, "潜水艦派遣作戦",       2880, 55,   0, [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0, 150,   0,   0,   0, 100, 9, 7)
-        Mission(31, "海外艦との接触",        120, 60, 200, [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0,  50,   0,  30,   0,   0, 5, 0)
-        Mission(35, "MO作戦",                420, 40,   0, [[7;11;16;18]; [7;11;16;18]; [5];          [2];     [];      [] ], 0, 0, 100,   0,   0, 240, 280, 8, 8)
-        Mission(36, "水上機基地建設",        540, 30,   0, [[16];         [16];         [3];          [2];     [];      [] ], 0, 0, 100, 480,   0, 200, 200, 8, 8)
-        Mission(37, "東京急行",              165, 50, 200, [[3];          [2];          [2];          [2];     [2];     [2]], 4, 4,  65,   0, 380, 270,   0, 8, 8)
-        Mission(38, "東京急行(弐)",          175, 65, 240, [[2];          [2];          [2];          [2];     [2];     [] ], 4, 8,  70, 420,   0, 200,   0, 8, 8)
-        Mission(39, "遠洋潜水艦作戦",       1800,  3, 180, [[20];         [13;14];      [13;14];      [13;14]; [13;14];    ], 0, 0, 160,   0,   0, 300,   0, 9, 9)
+        Mission( 1, "練習航海",               15,  1,   0, None,    [[];           [];                                              ], 0, 0,  10,   0,  30,   0,   0, 3, 0)
+        Mission( 2, "長距離練習航海",         30,  2,   0, None,    [[];           [];           [];           [];                  ], 0, 0,  15,   0, 100,  30,   0, 5, 0)
+        Mission( 3, "警備任務",               20,  3,   0, None,    [[];           [];           [];                                ], 0, 0,  30,  30,  30,  40,   0, 3, 2)
+        Mission( 4, "対潜警戒任務",           50,  3,   0, None,    [[3];          [2];          [2];                               ], 0, 0,  40,   0,  60,   0,   0, 5, 0)
+        Mission( 5, "海上護衛任務",           90,  3,   0, None,    [[3];          [2];          [2];          [];                  ], 0, 0,  40, 200, 200,  20,  20, 5, 0)
+        Mission( 6, "防空射撃演習",           40,  4,   0, None,    [[];           [];           [];           [];                  ], 0, 0,  50,   0,   0,   0,  80, 3, 2)
+        Mission( 7, "観艦式予行",             60,  5,   0, None,    [[];           [];           [];           [];      [];      [] ], 0, 0, 120,   0,   0,  50,  30, 5, 0)
+        Mission( 8, "観艦式",                180,  6,   0, None,    [[];           [];           [];           [];      [];      [] ], 0, 0, 140,  50, 100,  50,  50, 5, 2)
+        Mission( 9, "タンカー護衛任務",      240,  3,   0, None,    [[3];          [2];          [2];          [];                  ], 0, 0,  60, 350,   0,   0,   0, 5, 0)
+        Mission(10, "強行偵察任務",           90,  3,   0, None,    [[3];          [3];          [];                                ], 0, 0,  50,   0,  50,   0,  30, 3, 0)
+        Mission(11, "ボーキサイト輸送任務",  300,  6,   0, None,    [[2];          [2];          [];           [];                  ], 0, 0,  40,   0,   0,   0, 250, 5, 0)
+        Mission(12, "資源輸送任務",          480,  4,   0, None,    [[2];          [2];          [];           [];                  ], 0, 0,  50,  50, 250, 200,  50, 5, 0)
+        Mission(13, "鼠輸送作戦",            240,  5,   0, None,    [[3];          [2];          [2];          [2];     [2];     [] ], 0, 0,  60, 240, 300,   0,   0, 5, 4)
+        Mission(14, "包囲陸戦隊撤収作戦",    360,  6,   0, None,    [[3];          [2];          [2];          [2];     [];      [] ], 0, 0, 100,   0, 240, 200,   0, 5, 0)
+        Mission(15, "囮機動部隊支援作戦",    720,  8,   0, None,    [[7;11;16;18]; [7;11;16;18]; [2];          [2];     [];      [] ], 0, 0, 160,   0,   0, 300, 400, 5, 4)
+        Mission(16, "艦隊決戦援護作戦",      900, 10,   0, None,    [[3];          [2];          [2];          [];      [];      [] ], 0, 0, 200, 500, 500, 200, 200, 5, 4)
+        Mission(17, "敵地偵察作戦",           45, 20,   0, None,    [[3];          [2];          [2];          [2];     [];      [] ], 0, 0,  40,  70,  70,  50,   0, 3, 4)
+        Mission(18, "航空機輸送作戦",        300, 15,   0, None,    [[7;11;16;18]; [7;11;16;18]; [7;11;16;18]; [2];     [2];     [] ], 0, 0,  60,   0,   0, 300, 100, 5, 2)
+        Mission(19, "北号作戦",              360, 20,   0, None,    [[10];         [10];         [2];          [2];     [];      [] ], 0, 0,  70, 400,   0,  50,  30, 5, 4)
+        Mission(20, "潜水艦哨戒任務",        120,  1,   0, None,    [[13;14];      [3];                                             ], 0, 0,  50,   0,   0, 150,   0, 5, 4)
+        Mission(21, "北方鼠輸送作戦",        140, 15,  30, None,    [[3];          [2];          [2];          [2];     [2];        ], 3, 3,  55, 320, 270,   0,   0, 8, 7)
+        Mission(22, "艦隊演習",              180, 30,  45, None,    [[5];          [3];          [2];          [2];     [];      [] ], 0, 0, 400,   0,  10,   0,   0, 8, 7)
+        Mission(23, "航空戦艦運用演習",      240, 50, 200, None,    [[10];         [10];         [2];          [2];     [];      [] ], 0, 0, 420,   0,  20,   0, 100, 8, 8)
+        Mission(25, "通商破壊作戦",         2400, 25,   0, None,    [[5];          [5];          [2];          [2];                 ], 0, 0, 180, 900,   0, 500,   0, 5, 8)
+        Mission(26, "敵母港空襲作戦",       4800, 30,   0, None,    [[7;11;16;18]; [3];          [2];          [2];                 ], 0, 0, 200,   0,   0,   0, 900, 8, 8)
+        Mission(27, "潜水艦通商破壊作戦",   1200,  1,   0, None,    [[13;14];      [13;14];                                         ], 0, 0,  60,   0,   0, 800,   0, 8, 8)
+        Mission(28, "西方海域封鎖作戦",     1500, 30,   0, None,    [[13;14];      [13;14];      [13;14];                           ], 0, 0, 140,   0,   0, 900, 350, 8, 8)
+        Mission(29, "潜水艦派遣演習",       1440, 50,   0, None,    [[13;14];      [13;14];      [13;14];                           ], 0, 0, 100,   0,   0,   0, 100, 9, 4)
+        Mission(30, "潜水艦派遣作戦",       2880, 55,   0, None,    [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0, 150,   0,   0,   0, 100, 9, 7)
+        Mission(31, "海外艦との接触",        120, 60, 200, None,    [[13;14];      [13;14];      [13;14];      [13;14];             ], 0, 0,  50,   0,  30,   0,   0, 5, 0)
+        Mission(32, "遠洋練習航海",         1440,  5,   0, Some 21, [[21];         [2];          [2];                               ], 0, 0, 300,  50,  50,  50,  50, 9, 3)
+        Mission(35, "MO作戦",                420, 40,   0, None,    [[7;11;16;18]; [7;11;16;18]; [5];          [2];     [];      [] ], 0, 0, 100,   0,   0, 240, 280, 8, 8)
+        Mission(36, "水上機基地建設",        540, 30,   0, None,    [[16];         [16];         [3];          [2];     [];      [] ], 0, 0, 100, 480,   0, 200, 200, 8, 8)
+        Mission(37, "東京急行",              165, 50, 200, None,    [[3];          [2];          [2];          [2];     [2];     [2]], 4, 4,  65,   0, 380, 270,   0, 8, 8)
+        Mission(38, "東京急行(弐)",          175, 65, 240, None,    [[2];          [2];          [2];          [2];     [2];     [] ], 4, 8,  70, 420,   0, 200,   0, 8, 8)
+        Mission(39, "遠洋潜水艦作戦",       1800,  3, 180, None,    [[20];         [13;14];      [13;14];      [13;14]; [13;14];    ], 0, 0, 160,   0,   0, 300,   0, 9, 9)
     |]
     static let bindingList = SortableBindingList missions
     static let mutable bindedForm = null
@@ -516,6 +517,7 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
     member private this.Update (useFuels, useBullets, stypes, drum, daihatsu) =
         this.Result <- if Array.exists ((=) index) executingMissions then Execute else
                        if Array.length deck < List.length condition then Fail else
+                       if (match flagshipCondition with Some stype -> stypes.[0] <> stype | None -> false) then Fail else
                        if Array.filter ((<) 0) drum |> Array.length < drumShips then Fail else
                        if Array.sum drum < drumCount then Fail else
                        if (getNumber deck.[0].["api_lv"] |> int) < flagshipLevel then Fail else
@@ -531,7 +533,7 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
         steel <- int (float getSteel * daihatsu)
         bauxite <- int (float getBauxite * daihatsu)
 
-let missionWindow = lazy(createForm 829 809 "艦これ 司令部室 - 遠征計画" (fun form ->
+let missionWindow = lazy(createForm 829 833 "艦これ 司令部室 - 遠征計画" (fun form ->
     let decks = [|
         new RadioButton(AutoSize = true, Location = Point( 13, 13), Text = "第2艦隊", UseVisualStyleBackColor = true, Checked = true)
         new RadioButton(AutoSize = true, Location = Point( 83, 13), Text = "第3艦隊", UseVisualStyleBackColor = true)
@@ -540,7 +542,7 @@ let missionWindow = lazy(createForm 829 809 "艦これ 司令部室 - 遠征計�
     decks |> Array.iteri (fun i rb -> rb.CheckedChanged.Add(fun _ -> if rb.Checked then Mission.UpdateIndex(i + 1)))
     let hourly = new CheckBox(Size = Size(48, 16), Location = Point(729, 13), Anchor = anchorTR, Text = "時給", UseVisualStyleBackColor = true)
     hourly.CheckedChanged.Add(fun _ -> Mission.UpdateHourly hourly.Checked)
-    let grid = new DataGridView(Size = Size(829, 774), Location = Point(0, 35), Anchor = (AnchorStyles.Top ||| AnchorStyles.Bottom ||| AnchorStyles.Left ||| AnchorStyles.Right),
+    let grid = new DataGridView(Size = Size(829, 798), Location = Point(0, 35), Anchor = (AnchorStyles.Top ||| AnchorStyles.Bottom ||| AnchorStyles.Left ||| AnchorStyles.Right),
                                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, AllowUserToResizeRows = false,
                                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing)
                                 // , RowTemplate.Height = 21
@@ -900,13 +902,13 @@ extern bool FlashWindow(nativeint hWnd, bool bInvert);
 
 let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
     form.Name <- "Main"
-    let questLabels = Array.init 5 (fun i -> new Label(Location = Point(980, i * 16 +  28), Anchor = anchorTR, AutoSize = true) :> Control)
-    let missionLabels = Array.init 3 (fun i -> new Label(Location = Point(980, i * 16 + 132), Anchor = anchorTR, AutoSize = true) :> Control)
-    let dockLabels    = Array.init 4 (fun i -> new Label(Location = Point(980, i * 16 + 204), Anchor = anchorTR, AutoSize = true) :> Control)
-    let kousyouLabels = Array.init 4 (fun i -> new Label(Location = Point(980, i * 16 + 292), Anchor = anchorTR, AutoSize = true) :> Control)
-    let deckLabel = new Label(Location = Point(970, 364), Anchor = anchorTR, AutoSize = true)
-    let shipLabels = Array.init 6 (fun i -> new GradationLabel(Location = Point(980, i * 16 + 380), Anchor = anchorTR, AutoSize = true, MinimumSize = Size(100, 0)))
-    let maxCountLabel = new Label(Location = Point(970, 484), Anchor = anchorTR, AutoSize = true)
+    let questLabels = Array.init 6 (fun i -> new Label(Location = Point(980, i * 16 +  28), Anchor = anchorTR, AutoSize = true) :> Control)
+    let missionLabels = Array.init 3 (fun i -> new Label(Location = Point(980, i * 16 + 148), Anchor = anchorTR, AutoSize = true) :> Control)
+    let dockLabels    = Array.init 4 (fun i -> new Label(Location = Point(980, i * 16 + 220), Anchor = anchorTR, AutoSize = true) :> Control)
+    let kousyouLabels = Array.init 4 (fun i -> new Label(Location = Point(980, i * 16 + 308), Anchor = anchorTR, AutoSize = true) :> Control)
+    let deckLabel = new Label(Location = Point(970, 380), Anchor = anchorTR, AutoSize = true)
+    let shipLabels = Array.init 6 (fun i -> new GradationLabel(Location = Point(980, i * 16 + 396), Anchor = anchorTR, AutoSize = true, MinimumSize = Size(100, 0)))
+    let maxCountLabel = new Label(Location = Point(970, 500), Anchor = anchorTR, AutoSize = true)
     let clock = ref true
     Seq.concat [ missionLabels; dockLabels; kousyouLabels ] |> Seq.iter (fun c -> c.Click.Add(fun _ -> clock := not !clock))
     let deckIndex = ref 0
@@ -963,8 +965,8 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
 
     let webBrowser = new WebBrowser2(Location = Point(0, 0), Size = Size(960, 668), Anchor = (AnchorStyles.Top|||AnchorStyles.Bottom|||AnchorStyles.Left|||AnchorStyles.Right),
                                      ScriptErrorsSuppressed = true, Url = Uri "http://www.dmm.com/netgame/social/-/gadgets/=/app_id=854854/")
-    let mute       = new MuteCheckBox(Location = Point(970, 508), Anchor = anchorTR, Text = "消音", UseVisualStyleBackColor = true)
-    let screenShot = new Button(Location = Point(970, 532), Anchor = anchorTR, Text = "画像保存")
+    let mute       = new MuteCheckBox(Location = Point(970, 524), Anchor = anchorTR, Text = "消音", UseVisualStyleBackColor = true)
+    let screenShot = new Button(Location = Point(970, 548), Anchor = anchorTR, Text = "画像保存")
     let resize _ =
         100 * webBrowser.Width / 960 |> zoom webBrowser
     webBrowser.Resize.Add resize
@@ -977,10 +979,10 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
             e.ppDisp <- webBrowser.GetApplication())
         form.Show())
     screenShot.Click.Add(fun _ -> saveImage webBrowser)
-    let tweet = new Button(Location = Point(1051, 532), Anchor = anchorTR, Text = "呟く")
+    let tweet = new Button(Location = Point(1051, 548), Anchor = anchorTR, Text = "呟く")
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
 
-    let capture = new Button(Location = Point(970, 560), Anchor = anchorTR, Text = "動画保存", Enabled = captureSupported)
+    let capture = new Button(Location = Point(970, 576), Anchor = anchorTR, Text = "動画保存", Enabled = captureSupported)
     capture.Click.Add(let state = ref None in fun _ ->
         match !state with
         | None ->
@@ -1008,7 +1010,7 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
             } |> Async.StartImmediate
     )
 
-    let clear = new Button(Location = Point(1051, 560), Anchor = anchorTR, Text = "クリア")
+    let clear = new Button(Location = Point(1051, 576), Anchor = anchorTR, Text = "クリア")
     clear.Click.Add(fun _ ->
         let result = MessageBox.Show("艦これ 司令部室を終了し、Internet Explorer のインターネット一時ファイル\r\n（キャッシュ）を削除します。よろしいですか？", "艦これ 司令部室",
                                      MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation, MessageBoxDefaultButton.Button2)
@@ -1016,12 +1018,12 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
             Process.Start("rundll32", "inetcpl.cpl,ClearMyTracksByProcess 8") |> ignore
             form.Close())
 
-    let mission = new Button(Location = Point(970, 588), Anchor = anchorTR, Text = "遠征計画")
+    let mission = new Button(Location = Point(970, 604), Anchor = anchorTR, Text = "遠征計画")
     mission.Click.Add(fun _ ->
         let form = missionWindow.Force()
         form.Show()
         form.Activate())
-    let shiplist = new Button(Location = Point(1051, 588), Anchor = anchorTR, Text = "艦娘一覧")
+    let shiplist = new Button(Location = Point(1051, 604), Anchor = anchorTR, Text = "艦娘一覧")
     shiplist.Click.Add(fun _ ->
         let form = shipWindow.Force()
         form.Show()
@@ -1032,11 +1034,11 @@ let mainWindow () = createForm 1141 668 "艦これ 司令部室" (fun form ->
     panel.Controls.Add webBrowser
     panel.Controls.Add(new Label(Location = Point(970,  12), Anchor = anchorTR, AutoSize = true, Text = "任務："))
     panel.Controls.AddRange questLabels
-    panel.Controls.Add(new Label(Location = Point(970, 116), Anchor = anchorTR, AutoSize = true, Text = "遠征："))
+    panel.Controls.Add(new Label(Location = Point(970, 132), Anchor = anchorTR, AutoSize = true, Text = "遠征："))
     panel.Controls.AddRange missionLabels
-    panel.Controls.Add(new Label(Location = Point(970, 188), Anchor = anchorTR, AutoSize = true, Text = "入渠："))
+    panel.Controls.Add(new Label(Location = Point(970, 204), Anchor = anchorTR, AutoSize = true, Text = "入渠："))
     panel.Controls.AddRange dockLabels
-    panel.Controls.Add(new Label(Location = Point(970, 276), Anchor = anchorTR, AutoSize = true, Text = "建造："))
+    panel.Controls.Add(new Label(Location = Point(970, 292), Anchor = anchorTR, AutoSize = true, Text = "建造："))
     panel.Controls.AddRange kousyouLabels
     panel.Controls.Add deckLabel
     Array.iter panel.Controls.Add shipLabels
