@@ -9,7 +9,7 @@ type Settings () =
     static let defaultInstance = Settings () |> SettingsBase.Synchronized :?> Settings
     static do
         let version = Assembly.GetExecutingAssembly().GetName().Version
-        if String.IsNullOrEmpty defaultInstance.Version || Version defaultInstance.Version < version then
+        if (try String.IsNullOrEmpty defaultInstance.Version || Version defaultInstance.Version < version with :? ConfigurationErrorsException -> false) then
             try defaultInstance.Upgrade() with :? ConfigurationErrorsException -> defaultInstance.Reset()
             defaultInstance.Version <- version.ToString()
             defaultInstance.Save()

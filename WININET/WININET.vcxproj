@@ -22,7 +22,7 @@
     <ProjectGuid>{B6C56786-EDAB-4E2A-8570-C3C17DACEA75}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>WININET</RootNamespace>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.10586.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -153,6 +153,7 @@
     <ClCompile Include="WININET.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\callproc.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>

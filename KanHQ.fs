@@ -9,7 +9,6 @@ open System.Globalization
 open System.IO
 open System.IO.IsolatedStorage
 open System.Net
-open System.Net.NetworkInformation
 open System.Reflection
 open System.Runtime.InteropServices
 open System.Text
@@ -22,15 +21,14 @@ open Sayuri.FSharp.Local
 open Sayuri.JsonSerializer
 open Sayuri.Windows.Forms
 
-[<assembly: AssemblyCompany "Haxe"; AssemblyProduct "KanHQ"; AssemblyCopyright "Copyright ©  2013-2015 はぇ～"; AssemblyKeyFile "KanHQ.snk">]
+[<assembly: AssemblyCompany "Haxe"; AssemblyProduct "KanHQ"; AssemblyCopyright "Copyright ©  2013-2016 はぇ～"; AssemblyKeyFile "KanHQ.snk">]
 #if LIGHT
-[<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "0.8.5.0"; AssemblyVersion "0.8.5.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "1.0.7.0"; AssemblyVersion "1.0.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "1.0.0.0"; AssemblyVersion "1.0.0.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "1.0.7.0"; AssemblyVersion "1.0.7.0">]
 #endif
 do
     let values = [|
-        "FEATURE_BROWSER_EMULATION", 8000
         "FEATURE_GPU_RENDERING", 1
         "FEATURE_SCRIPTURL_MITIGATION", 1
 
@@ -67,6 +65,10 @@ do
     |]
     let name = Path.GetFileName Application.ExecutablePath
     use key = Registry.CurrentUser.CreateSubKey @"Software\Microsoft\Internet Explorer\Main\FeatureControl"
+    do
+        use key = key.CreateSubKey "FEATURE_BROWSER_EMULATION"
+        let version = Version(Registry.GetValue(@"HKEY_LOCAL_MACHINE\Software\Microsoft\Internet Explorer", "Version", "8.0.0.0") |> string)
+        key.SetValue(name, (if version.Major = 9 && version.Minor > 9 then version.Minor else version.Major) * 1000)
     for subkey, value in values do
         use key = key.CreateSubKey subkey
         key.SetValue(name, value)
@@ -87,6 +89,8 @@ do
     Application.EnableVisualStyles()
     Application.SetCompatibleTextRenderingDefault false
 
+#if LIGHT
+#else
 [<UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet=CharSet.Unicode)>]
 type OnRequest = delegate of path : string -> bool
 [<UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet=CharSet.Unicode)>]
@@ -96,9 +100,17 @@ extern nativeint private LoadLibrary(string lpFileName);
 [<DllImport("wininet.dll", CharSet = CharSet.Unicode)>]
 extern void private SetCallback(OnRequest onRequest, OnResponse onResponse);
 
-let wininet = LoadLibrary(if IntPtr.Size = 8 then @"x64\wininet.dll" else @"x86\wininet.dll")
+let wininet =
+    let modules = [| for m in Process.GetCurrentProcess().Modules -> m |]
+    if modules |> Array.exists (fun m -> StringComparer.InvariantCultureIgnoreCase.Equals(m.ModuleName, "wininet.dll")) then
+        if modules |> Array.exists (fun m -> m.FileName.ToUpperInvariant().Contains "JWORD") then
+            MessageBox.Show("JWordにより処理がブロックされました。\r\n必要なければJWordをアンインストールしてください。", "艦これ 司令部室") |> ignore
+            Environment.Exit 1
+        modules |> Array.map (fun m -> m.FileName) |> String.concat ", " |> failwithf "wininet.dllを読み込めませんでした。次のモジュールが既に読み込まれています。: %s"
+    LoadLibrary(if IntPtr.Size = 8 then @"x64\wininet.dll" else @"x86\wininet.dll")
 
 let captureSupported = Capture.test ()
+#endif
 
 #if UNUSED
 let parseHttpDate (time : string) =
@@ -266,16 +278,18 @@ let saveImage webBrowser =
             let folder = Settings.Default.PictureFolder
             let folder = if Directory.Exists folder then folder else Environment.GetFolderPath Environment.SpecialFolder.MyPictures
             let folder = if Directory.Exists folder then folder else "."
-            let names = DirectoryInfo(folder).GetFiles "艦これ-*.png" |> Array.map (fun fi -> fi.Name)
-            let rec loop i =
-                let name = sprintf "艦これ-%03d.png" i
-                if Array.forall ((<>) name) names then Path.Combine(folder, name) else loop (i + 1)
-            bitmap.Save(loop 1, ImageFormat.Png)
+            let counts = DirectoryInfo(folder).GetFiles "艦これ-*.png"
+                      |> Array.choose (fun fi -> let m = Regex.Match(fi.Name, @"^艦これ-(\d+).png$", RegexOptions.IgnoreCase)
+                                                 if m.Success then int m.Groups.[1].Value |> Some else None)
+            let no = if Array.isEmpty counts then 1 else Array.max counts + 1
+            bitmap.Save(Path.Combine(folder, sprintf "艦これ-%03d.png" no), ImageFormat.Png)
         } |> Async.Start)
 
 let tweetImage webBrowser form =
     getImage webBrowser |> Option.iter (tweetWindow form)
 
+#if LIGHT
+#else
 let configCapture () =
     let config = Capture.configList()
     let form = createForm 486 174 "艦これ 司令部室 - 動画設定" (fun form ->
@@ -333,6 +347,7 @@ let configCapture () =
         form.MaximizeBox <- false
         form.MinimizeBox <- false)
     form.ShowDialog() = DialogResult.OK
+#endif
 
 let zoom (webBrowser : WebBrowser2) (percent : int) =
     // モニタサイズが小さいと縮小され初期化中にResizeイベントが飛ぶ模様。その際、ExecWB()が失敗しCOMExceptionを引き起こす。
@@ -356,7 +371,7 @@ let mainWindow () = createForm 864 480 "艦これ 司令部室 Light" (fun form 
     webBrowser.Resize.Add resize
     webBrowser.DocumentCompleted.Add(fun _ ->
         WebBrowser2.GetElementById(webBrowser.DomDocument, "game_frame")
-        |> Option.iter (fun _ -> webBrowser.AddStyleSheet "body{margin:0;overflow:hidden}#game_frame{position:fixed;left:50%;top:-16px;margin-left:-450px;z-index:1}")
+        |> Option.iter (fun _ -> webBrowser.AddStyleSheet "body{margin:0;overflow:hidden}#game_frame{position:fixed;left:50%;top:-16px;margin-left:-450px;z-index:11}")
         resize ())
     screenShot.Click.Add(fun _ -> saveImage webBrowser)
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
@@ -501,7 +516,7 @@ type Mission (index : int, name : string, duration : int, flagshipLevel : int, t
                                                                   get "api_fuel_max" ship |> getNumber, getNumber ship.["api_bull_max"], getNumber ship.["api_stype"] |> int) deck |> Array.unzip3
         let drum, daihatsu = let shipSlots = Array.map (get "api_slot" >> getArray) deck
                              lock slotitems (fun () -> Array.map (Array.choose (getNumber >> function -1.0 -> None | id -> Some slotitems.[id])) shipSlots)
-                             |> Array.map (fun slots -> Array.sumBy (fun id -> if id = 75.0 then 1 else 0) slots, Array.sumBy (fun id -> if id = 68.0 then 0.05 else 0.00) slots)
+                             |> Array.map (fun slots -> Array.sumBy (fun (id, _) -> if id = 75.0 then 1 else 0) slots, Array.sumBy (fun (id, _) -> if id = 68.0 then 0.05 else 0.00) slots)
                              |> Array.unzip
         let daihatsu = 1.00 + (Array.sum daihatsu |> min 0.20)
         missions |> Array.iter (fun mission -> mission.Update(useFuels, useBullets, stypes, drum, daihatsu))
@@ -608,7 +623,7 @@ type Ship private (id : float) =
                      |> Array.map getNumber
         let ids = Dictionary()
         bindingList |> Seq.iteri (fun i item -> ids.Add(item.Index, i) |> ignore)
-        let repairitems = lock slotitems (fun () -> Seq.choose (fun (KeyValue(id, itemid)) -> if itemid = 86.0 then Some id else None) slotitems |> Array.ofSeq)
+        let repairitems = lock slotitems (fun () -> Seq.choose (fun (KeyValue(id, (itemid, _))) -> if itemid = 86.0 then Some id else None) slotitems |> Array.ofSeq)
         lock ships (fun () ->
             repairShips <- decks
                         |> Array.map (fun deck -> getArray deck.["api_ship"] |> Array.map getNumber)
@@ -731,7 +746,7 @@ type Slotitem (masterid, count, shipNames) =
                                                                     getArray ship.["api_slot"] |> Array.iter (fun itemid -> let itemid = getNumber itemid
                                                                                                                             if 0.0 < itemid then itemShip.Add(itemid, name))))
         lock slotitems (fun () ->
-            Seq.groupBy (fun (KeyValue(_, masterid)) -> masterid) slotitems
+            Seq.groupBy (fun (KeyValue(_, (masterid, _))) -> masterid) slotitems
             |> Seq.iter (fun (masterid, group) -> let count = Seq.length group
                                                   let shipNames = Seq.choose (fun (KeyValue(id, _)) -> match itemShip.TryGetValue id with true, name -> Some name | false, _ -> None) group
                                                                |> Seq.distinct
@@ -818,13 +833,22 @@ let shipWindow = lazy(createForm 925 664 "艦これ 司令部室 - 艦娘一覧"
         let ship = bindingList.[c.RowIndex]
         let images =
             use storage = IsolatedStorageFile.GetUserStoreForAssembly()
-            let map = masterShips |> Seq.choose (fun (KeyValue (key, value)) -> match value.TryGetValue "api_aftershipid" with
-                                                                                | true, JsonString afterid when afterid <> "0" -> Some (float afterid, key)
-                                                                                | _,    _                                      -> None)
-                                  |> dict
-            Some ship.ShipId
-            |> Seq.unfold (Option.map (fun id -> get "api_filename" masterGraph.[id] |> getString, match map.TryGetValue id with true, id -> Some id | false, _ -> None))
-            |> Seq.distinct
+
+            // TODO: 図鑑も参照するべき
+            let aftershipids = Array.ofSeq masterShips
+                            |> Array.choose (fun (KeyValue (id, value)) -> match value.TryGetValue "api_aftershipid" with
+                                                                           | true, JsonString aftershipid when aftershipid <> "0" -> Some (id, float aftershipid)
+                                                                           | _,    _                                              -> None)
+            let rec getRoot set id =
+                match Array.tryPick (fun (parent, child) -> if child = id && Set.contains parent set |> not then Some parent else None) aftershipids with
+                | Some parent -> getRoot (Set.add parent set) parent
+                | None        -> id
+            let rec getTree set id =
+                Array.fold (fun set (parent, child) -> if parent = id && Set.contains child set |> not then getTree set child else set) (Set.add id set) aftershipids
+
+            getRoot Set.empty ship.ShipId
+            |> getTree Set.empty
+            |> Set.map (fun id -> get "api_filename" masterGraph.[id] |> getString)
             |> Seq.map (fun name -> try
                                         use file = new IsolatedStorageFileStream(sprintf "ships/%s.swf" name, FileMode.Open, storage)
                                         let swflist = SwfParser.parse file
@@ -955,14 +979,42 @@ let mainWindow () = createForm (browserWidth + 181) 668 "艦これ 司令部室"
                           sprintf "%02d:%02d:%02d %s" (int span.TotalHours) span.Minutes span.Seconds t))
         if !deckIndex < decks.Length && 0 < masterShips.Count then
             let deck = decks.[!deckIndex]
-            let ships = lock ships (fun () -> getArray deck.["api_ship"] |> Array.choose (function JsonNumber shipid when shipid <> -1.0 -> Some (shipid, ships.[shipid]) | _ -> None))
+            let ships = lock ships (fun () -> getArray deck.["api_ship"] |> Array.choose (getNumber >> fun shipid -> match ships.TryGetValue shipid with true, value -> Some (shipid, value) | _ -> None))
             let sakuteki, seikuu = lock slotitems (fun () ->
-                ships |> Array.map (fun (_, ship) -> let sakuteki, scaled, taiku = getArray ship.["api_slot"]
-                                                                                |> Array.map (getNumber >> slotitems.TryGetValue >> function true, masterid -> masterSakuteki.[masterid] | false, _ -> 0.0, 0.0, 0.0)
+                ships |> Array.map (fun (_, ship) -> let sakuteki, scaled, taiku = (getArray ship.["api_slot"], getArray ship.["api_onslot"])
+                                                                               ||> Array.map2 (fun slot onslot -> match getNumber slot |> slotitems.TryGetValue with
+                                                                                                                  | true, (masterid, alv) -> let type_, sakuteki, taiku = masterSakuteki.[masterid]
+                                                                                                                                             let scale = match type_ with
+                                                                                                                                                         |  7.0 -> 1.04    // 艦上爆撃機
+                                                                                                                                                         |  8.0 -> 1.37    // 艦上攻撃機
+                                                                                                                                                         |  9.0 -> 1.66    // 艦上偵察機
+                                                                                                                                                         | 10.0 -> 2.00    // 水上偵察機
+                                                                                                                                                         | 11.0 -> 1.78    // 水上爆撃機
+                                                                                                                                                         | 12.0 -> 1.00    // 小型電探
+                                                                                                                                                         | 13.0 -> 0.99    // 大型電探
+                                                                                                                                                         | 29.0 -> 0.91    // 探照灯
+                                                                                                                                                         | _    -> 0.00
+                                                                                                                                             let taiku = match type_ with
+                                                                                                                                                         |  6.0  // 艦上戦闘機
+                                                                                                                                                         |  7.0  // 艦上爆撃機
+                                                                                                                                                         |  8.0  // 艦上攻撃機
+                                                                                                                                                         | 11.0  // 水上爆撃機
+                                                                                                                                                             -> taiku * sqrt (getNumber onslot) |> int
+                                                                                                                                                         | _ -> 0
+                                                                                                                                             // 艦載機熟練度
+                                                                                                                                             let taiku = if alv <> Some 7.0 then taiku else
+                                                                                                                                                         taiku + match type_ with
+                                                                                                                                                                 |  6.0 -> 25       // 艦上戦闘機
+                                                                                                                                                                 |  7.0 ->  3       // 艦上爆撃機
+                                                                                                                                                                 |  8.0 ->  3       // 艦上攻撃機
+                                                                                                                                                                 | 11.0 ->  9       // 水上爆撃機
+                                                                                                                                                                 | _    ->  0
+                                                                                                                                             sakuteki, sakuteki * scale, taiku
+                                                                                                                  | false, _              -> 0.0, 0.0, 0)
                                                                                 |> Array.unzip3
                                                      let sakuteki = getNumber (getArray ship.["api_sakuteki"]).[0] - Array.sum sakuteki
                                                      let sakuteki = Array.sum scaled + sqrt sakuteki * 1.69
-                                                     let seikuu = getArray ship.["api_onslot"] |> Array.zip taiku |> Array.sumBy (fun (taiku, count) -> let count = getNumber count in taiku * sqrt count |> int)
+                                                     let seikuu = Array.sum taiku
                                                      sakuteki, seikuu)
                       |> Array.unzip)
             let sakuteki, seikuu = Array.sum sakuteki - 0.61 * float ((hqLevel + 4) / 5 * 5), Array.sum seikuu
@@ -1079,7 +1131,7 @@ let mainWindow () = createForm (browserWidth + 181) 668 "艦これ 司令部室"
 
 
 let epoch = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).ToLocalTime()
-let masterQuests = [| ""; "編成"; "出撃"; "演習"; "遠征"; "入渠"; "工廠"; "改装" |]
+let masterQuests = [| "不明"; "編成"; "出撃"; "演習"; "遠征"; "入渠"; "工廠"; "改装" |]
 let completedQuests = ResizeArray()
 
 let action path =
@@ -1104,6 +1156,8 @@ let action path =
         Ship.UpdateShips()
         Slotitem.UpdateItems()
         Mission.UpdateDecks()
+    let addSlotitem (item : IDictionary<_, _>) =
+        slotitems.Add(getNumber item.["api_id"], (getNumber item.["api_slotitem_id"], match item.TryGetValue "api_alv" with true, JsonNumber alv -> Some alv | _, _ -> None))
     let mission key json =
         decks <- get key json
               |> getArray
@@ -1156,26 +1210,7 @@ let action path =
             update masterSlotitems "api_mst_slotitem"
             update masterSlotitemEquiptypes "api_mst_slotitem_equiptype"
             for KeyValue(masterid, master) in masterSlotitems do
-                let sakuteki = getNumber master.["api_saku"]
-                let type_ = getNumber (getArray master.["api_type"]).[2]
-                let scale = match type_ with
-                            |  7.0 -> 1.04    // 艦上爆撃機
-                            |  8.0 -> 1.37    // 艦上攻撃機
-                            |  9.0 -> 1.66    // 艦上偵察機
-                            | 10.0 -> 2.00    // 水上偵察機
-                            | 11.0 -> 1.78    // 水上爆撃機
-                            | 12.0 -> 1.00    // 小型電探
-                            | 13.0 -> 0.99    // 大型電探
-                            | 29.0 -> 0.91    // 探照灯
-                            | _    -> 0.00
-                let taiku = match type_ with
-                            |  6.0  // 艦上戦闘機
-                            |  7.0  // 艦上爆撃機
-                            |  8.0  // 艦上攻撃機
-                            | 11.0  // 水上爆撃機
-                                -> getNumber master.["api_tyku"]
-                            | _ -> 0.0
-                masterSakuteki.[masterid] <- (sakuteki, sakuteki * scale, taiku)
+                masterSakuteki.[masterid] <- (getNumber (getArray master.["api_type"]).[2], getNumber master.["api_saku"], getNumber master.["api_tyku"])
             for item in getArray data.["api_mst_mission"] do
                 let item = getObject item
                 masterMissions.[getNumber item.["api_id"]] <- getString item.["api_name"]
@@ -1188,7 +1223,7 @@ let action path =
         Some(fun req res ->
             let items = parseJson res |> get "api_data" |> getArray |> Array.map getObject
             lock slotitems (fun () -> slotitems.Clear()
-                                      items |> Array.iter (fun item -> slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"])))
+                                      Array.iter addSlotitem items)
             Slotitem.UpdateItems()
         )
     | "/kcsapi/api_get_member/questlist" ->     // 任務を操作後に最新情報を取得している。
@@ -1208,7 +1243,8 @@ let action path =
                                     let array = Array.map (fun (no, _, _) -> no) array
                                     Some (Array.min array, Array.max array)
                 let newQuests = array |> Array.choose (fun (no, state, item) -> if state = 1.0 then None else
-                                                                                Some (no, getString item.["api_title"] |> sprintf "%s; %s" masterQuests.[getNumber item.["api_category"] |> int]))
+                                                                                let index = getNumber item.["api_category"] |> int
+                                                                                Some (no, getString item.["api_title"] |> sprintf "%s; %s" masterQuests.[if index < masterQuests.Length then index else 0]))
                 let restQuests = match restQuest with None -> [||] | Some (min, max) -> Array.choose (function Some (no, _) when min <= no && no <= max -> None | item -> item) quests
                 let sortedQuests = Array.append restQuests newQuests |> Array.sort
                 quests <- Array.init count (fun i -> if i < sortedQuests.Length then Some sortedQuests.[i] else None)
@@ -1243,9 +1279,9 @@ let action path =
         Some(fun req res ->
             let data = parseJson res |> get "api_data" |> getObject
             match data.TryGetValue "api_slotitem" with
-            | false, _ -> ()
-            | true, items -> lock slotitems (fun () -> getArray items |> Array.iter (fun item -> let item = getObject item in slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"])))
-                             Slotitem.UpdateItems()
+            | true, JsonArray items -> lock slotitems (fun () -> Array.iter (getObject >> addSlotitem) items)
+                                       Slotitem.UpdateItems()
+            | _, _ -> ()
             lock ships (fun () -> ships.Add(getNumber data.["api_id"], getObject data.["api_ship"]))
             Ship.UpdateShips()
             Slotitem.UpdateItems()
@@ -1260,10 +1296,9 @@ let action path =
         Some(fun req res ->
             let data = parseJson res |> get "api_data" |> getObject
             match data.TryGetValue "api_slot_item" with
-            | false, _ -> ()
-            | true, item -> let item = getObject item
-                            lock slotitems (fun () -> slotitems.Add(getNumber item.["api_id"], getNumber item.["api_slotitem_id"]))
-                            Slotitem.UpdateItems()
+            | true, JsonObject item -> lock slotitems (fun () -> addSlotitem item)
+                                       Slotitem.UpdateItems()
+            | _, _ -> ()
         )
     | "/kcsapi/api_req_kousyou/destroyitem2" ->
         Some(fun req res ->
@@ -1296,6 +1331,12 @@ let action path =
                                                             shipids |> Array.tryFindIndex (fun sid -> sid1 = getNumber sid)
                                                                     |> Option.iter (fun idx -> if sid2 = -1.0 then remove shipids idx else shipids.[idx] <- JsonNumber sid2))
                            shipids.[if 0 < idx && getNumber shipids.[idx - 1] = -1.0 then idx - 1 else idx] <- JsonNumber sid1
+            Mission.UpdateDecks()
+        )
+    | "/kcsapi/api_req_hensei/preset_select" ->
+        Some(fun req res ->
+            let request = parseQuery req
+            decks.[int request.["api_deck_id"] - 1] <- parseJson res |> get "api_data" |> getObject
             Mission.UpdateDecks()
         )
     | "/kcsapi/api_get_member/ship3" ->

@@ -84,33 +84,33 @@ let deserialize offset (s : string) =
             | '-' -> incr i; -1.0
             | _   ->         +1.0
 
-        let significand =
+        let significand, exponent1 =
             let integer =
                 match s.[!i] with
-                | '0' -> incr i; 0m
+                | '0' -> incr i; 0.0
                 | c when '1' <= c && c <= '9' ->
                     let rec loop value =
                         match byte s.[!i] with
                         | c when '0'B <= c && c <= '9'B ->
                             incr i
-                            loop (value * 10m + decimal (c - '0'B))
+                            loop (value * 10.0 + float (c - '0'B))
                         | _ -> value
-                    loop 0m
+                    loop 0.0
                 | _ -> failwith ""
 
             match s.[!i] with
             | '.' ->
                 incr i
-                let rec loop value scale =
+                let rec loop value exponent =
                     match byte s.[!i] with
                     | c when '0'B <= c && c <= '9'B ->
                         incr i
-                        loop (value + scale * decimal (c - '0'B)) (scale * 0.1m)
-                    | _ -> value
-                loop integer 0.1m
-            | _ -> integer
+                        loop (value * 10.0 + float (c - '0'B)) (exponent - 1)
+                    | _ -> value, exponent
+                loop integer 0
+            | _ -> integer, 0
 
-        let exponent =
+        let exponent2 =
             match s.[!i] with
             | 'E' | 'e' ->
                 incr i
@@ -125,10 +125,10 @@ let deserialize offset (s : string) =
                         incr i
                         loop (value * 10 + int (c - '0'B))
                     | _ -> value
-                10.0 ** float (sign * loop 0)
-            | _ -> 1.0
+                sign * loop 0
+            | _ -> 0
 
-        sign * float significand * exponent
+        sign * significand * 10.0 ** float (exponent1 + exponent2)
 
     let isMatch substr =
         let rec loop i j =
