@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "1.0.7.0"; AssemblyVersion "1.0.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "1.0.7.0"; AssemblyVersion "1.0.7.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "1.0.8.0"; AssemblyVersion "1.0.8.0">]
 #endif
 do
     let values = [|
@@ -1168,10 +1168,15 @@ let action path =
                                                toDateTime mission.[2] |> Option.map (fun dateTime -> dateTime, match getNumber mission.[1] |> masterMissions.TryGetValue with
                                                                                                                | true, name -> name
                                                                                                                | false, _   -> "遠征中"))
-    let basic data =
-        let data = getObject data
+    let basic key data =
+        let data = get key data |> getObject
         maxCount <- getNumber data.["api_max_chara"] |> int, (getNumber data.["api_max_slotitem"] |> int) + 3
         hqLevel <- getNumber data.["api_level"] |> int
+    let slot_item key data =
+        let items = get key data |> getArray |> Array.map getObject
+        lock slotitems (fun () -> slotitems.Clear()
+                                  Array.iter addSlotitem items)
+        Slotitem.UpdateItems()
     let ndock data =
         let docks = getArray data |> Array.map (fun dock -> let dock = getObject dock
                                                             toDateTime dock.["api_complete_time"] |> Option.map (fun dateTime -> dateTime, getNumber dock.["api_ship_id"]))
@@ -1217,15 +1222,16 @@ let action path =
         )
     | "/kcsapi/api_req_member/get_incentive" -> // 初回と再読み込み時も
         Some(fun req res -> quests <- [| None |])
-    | "/kcsapi/api_get_member/basic" ->         // 起動時とあと時々
-        Some(fun req res -> parseJson res |> get "api_data" |> basic)
-    | "/kcsapi/api_get_member/slot_item" ->      // 起動時に装備一覧を取得している。
+    | "/kcsapi/api_get_member/require_info" -> // 初回と再読み込み時？
         Some(fun req res ->
-            let items = parseJson res |> get "api_data" |> getArray |> Array.map getObject
-            lock slotitems (fun () -> slotitems.Clear()
-                                      Array.iter addSlotitem items)
-            Slotitem.UpdateItems()
+            let data = parseJson res |> get "api_data" |> getObject
+            //basic "api_basic" data    // incomplete
+            slot_item "api_slot_item" data
         )
+    | "/kcsapi/api_get_member/basic" ->         // 起動時とあと時々
+        Some(fun req res -> parseJson res |> basic "api_data")
+    | "/kcsapi/api_get_member/slot_item" ->      // 起動時に装備一覧を取得している。
+        Some(fun req res -> parseJson res |> slot_item "api_data")
     | "/kcsapi/api_get_member/questlist" ->     // 任務を操作後に最新情報を取得している。
         Some(fun req res ->
             let data = parseJson res
@@ -1262,7 +1268,7 @@ let action path =
             let data = parseJson res |> get "api_data" |> getObject
             updateShips "api_ship" data
             mission "api_deck_port" data
-            basic data.["api_basic"]
+            basic "api_basic" data
             ndock data.["api_ndock"]
         )
     | "/kcsapi/api_get_member/ship2" ->         // 遠征後と入渠時に艦情報の一覧を取得している。
