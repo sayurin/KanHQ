@@ -616,8 +616,6 @@ open System.Windows.Forms
 open Microsoft.FSharp.NativeInterop
 open Sayuri.FSharp.Local
 
-[<DllImport("Kernel32.dll", CharSet = CharSet.Unicode)>]
-extern nativeint private LoadLibrary(string lpFileName);
 type Callback = delegate of qpc : int64 * surface : nativeint -> unit
 [<DllImport("d3d9.dll")>]
 extern void private GetParameter([<Out>] uint32& width, [<Out>] uint32& height, [<Out>] Guid& format, [<Out>] uint32& fps);
@@ -668,10 +666,8 @@ type MFTransformClassFactory (majorType, subType, preferredCodec) as this =
         member this.Dispose () =
             MFTUnregisterLocal this
 
-let test () =
-    let supported = Version(6, 1) <= Environment.OSVersion.Version
-    if supported then LoadLibrary(if IntPtr.Size = 8 then @"x64\d3d9.dll" else @"x86\d3d9.dll") |> ignore
-    supported
+let supported () =
+    Version(6, 1) <= Environment.OSVersion.Version
 
 let configList () =
     use __ = resource (fun () -> MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)) MFShutdown
@@ -690,7 +686,7 @@ let configList () =
 let start folder (size : Size) save (stop : EventWaitHandle) (completed : EventWaitHandle) =
     async{
         let extension, videoFormat, audioFormat =
-            if table.ContainsKey Settings.Default.Extension && Settings.Default.VideoFormat <> "" && Settings.Default.AudioFormat <> ""
+            if table.ContainsKey Settings.Default.Extension && String.IsNullOrEmpty Settings.Default.VideoFormat |> not && String.IsNullOrEmpty Settings.Default.AudioFormat |> not
                 then Settings.Default.Extension, Guid Settings.Default.VideoFormat, Guid Settings.Default.AudioFormat
                 else "wmv",                      MFVideoFormat_WMV3,                MFAudioFormat_WMAudioV9
         use _ = resource (fun () -> MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)) MFShutdown

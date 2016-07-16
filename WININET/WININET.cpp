@@ -1,8 +1,8 @@
 #define _USING_V110_SDK71_				// for xp
 #define _WINX32_						// don't import WinInet.h and Winineti.h
 #define WIN32_LEAN_AND_MEAN				// avoid Winsock
+#define _HAS_EXCEPTIONS 0
 #include <algorithm>					// for std::copy_n
-#include <exception>					// for std::exception
 #include <memory>						// for std::make_unique, std::unique_ptr
 #include <mutex>						// for std::lock_guard, std::mutex
 #include <string>						// for std::wstring
@@ -17,6 +17,11 @@
 #define DLLNAME "WININET.dll"
 #include "../callproc.h"
 
+static inline void append(std::vector<unsigned char>& buffer, const void* src, std::size_t count) {
+	buffer.resize(size(buffer) + count);
+	std::copy_n(reinterpret_cast<const unsigned char*>(src), count, begin(buffer) + size(buffer) - count);
+}
+
 class char2wchar {
 	std::unique_ptr<wchar_t[]> buffer;
 public:
@@ -26,8 +31,7 @@ public:
 		auto length = MultiByteToWideChar(CP_THREAD_ACP, 0, src, -1, nullptr, 0);
 		buffer = std::make_unique<wchar_t[]>(length);
 		auto result = MultiByteToWideChar(CP_THREAD_ACP, 0, src, -1, buffer.get(), length);
-		if (result == 0)
-			throw std::exception("MultiByteToWideChar failed", GetLastError());
+		_ASSERTE(result == length);
 	}
 	operator const wchar_t*() const {
 		return buffer ? buffer.get() : nullptr;
@@ -65,11 +69,8 @@ static void addRequest(BOOL result, HINTERNET hRequest, LPVOID lpOptional, DWORD
 	if ((result || lastError == ERROR_IO_PENDING) && lpOptional && 0 < dwOptionalLength) {
 		std::lock_guard<std::mutex> lock(mutex);
 		auto itor = sessions.find(hRequest);
-		if (itor != sessions.end()) {
-			auto& request = itor->second.request;
-			request.resize(dwOptionalLength);
-			std::copy_n(reinterpret_cast<unsigned char*>(lpOptional), dwOptionalLength, request.data());
-		}
+		if (itor != sessions.end())
+			append(itor->second.request, lpOptional, dwOptionalLength);
 	}
 	SetLastError(lastError);
 }
@@ -137,12 +138,9 @@ BOOLAPI InternetReadFile(_In_ HINTERNET hFile, _Out_writes_bytes_(dwNumberOfByte
 			_RPTWN(_CRT_WARN, L"WININET: InternetReadFile(%d => %d, %s, %d) => %d, %d\n", dwNumberOfBytesToRead, *lpdwNumberOfBytesRead, itor->second.path.c_str(), itor->second.response.size(), result, lastError);
 			if (result) {
 				auto read = *lpdwNumberOfBytesRead;
-				auto& response = itor->second.response;
-				if (0 < read) {
-					auto oldsize = response.size();
-					response.resize(oldsize + read);
-					std::copy_n(reinterpret_cast<unsigned char*>(lpBuffer), read, &response[oldsize]);
-				} else
+				if (0 < read)
+					append(itor->second.response, lpBuffer, read);
+				else
 					callOnResponse(itor);
 			} else
 				sessions.erase(itor);

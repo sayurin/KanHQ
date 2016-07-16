@@ -57,35 +57,27 @@
     </Otherwise>
   </Choose>
   <Import Project="$(FSharpTargetsPath)" />
-  <Target Name="BeforeBuild">
-    <MSBuild Projects="@(Native)" Targets="Build" />
+  <Target Name="BeforeBuild" Condition=" '$(Configuration)' != 'LightRelease' ">
+    <MSBuild Projects="@(Native)" Targets="Build" Properties="OutDir=$(MSBuildProjectDirectory)\;Platform=x64" />
+    <MSBuild Projects="@(Native)" Targets="Build" Properties="OutDir=$(MSBuildProjectDirectory)\;Platform=Win32" />
   </Target>
-  <Target Name="BeforeClean">
-    <MSBuild Projects="@(Native)" Targets="Clean" />
+  <Target Name="BeforeClean" Condition=" '$(Configuration)' != 'LightRelease' ">
+    <MSBuild Projects="@(Native)" Targets="Clean" Properties="OutDir=$(MSBuildProjectDirectory)\;Platform=x64" />
+    <MSBuild Projects="@(Native)" Targets="Clean" Properties="OutDir=$(MSBuildProjectDirectory)\;Platform=Win32" />
   </Target>
   <ItemGroup>
-    <Native Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
-      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x64\;Platform=x64</Properties>
-    </Native>
-    <Native Include="d3d9\d3d9.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
-      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x86\;Platform=Win32</Properties>
-    </Native>
-    <Native Include="WININET\WININET.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
-      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x64\;Platform=x64</Properties>
-    </Native>
-    <Native Include="WININET\WININET.vcxproj" Condition=" '$(Configuration)' != 'LightRelease' ">
-      <Properties>OutDir=$(MSBuildProjectDirectory)\$(OutDir)x86\;Platform=Win32</Properties>
-    </Native>
+    <Native Include="d3d9\d3d9.vcxproj" />
+    <Native Include="WININET\WININET.vcxproj" />
     <Compile Include="Local.fs" />
     <Compile Include="Settings.fs" />
     <Compile Include="TextBox2.fs" />
     <Compile Include="WebBrowser2.fs" />
     <Compile Include="Form2.fs" />
     <Compile Include="Json.fs" />
-    <Compile Include="ZlibStream.fs" />
-    <Compile Include="SwfParser.fs" />
+    <Compile Include="ZlibStream.fs" Condition=" '$(Configuration)' != 'LightRelease' " />
+    <Compile Include="SwfParser.fs" Condition=" '$(Configuration)' != 'LightRelease' " />
     <Compile Include="Mixer.fs" />
-    <Compile Include="Capture.fs" />
+    <Compile Include="Capture.fs" Condition=" '$(Configuration)' != 'LightRelease' " />
     <Compile Include="OAuth.fs" />
     <Compile Include="Twitter.fs" />
     <Compile Include="KanHQ.fs" />
@@ -102,6 +94,10 @@
     <EmbeddedResource Include="Tweet.png" Condition=" '$(Configuration)' == 'LightRelease' " />
     <EmbeddedResource Include="Volume.png" Condition=" '$(Configuration)' == 'LightRelease' " />
     <None Include="KanHQ.snk" />
+    <EmbeddedResource Include="d3d9-32.dll" />
+    <EmbeddedResource Include="d3d9-64.dll" />
+    <EmbeddedResource Include="WININET-32.dll" />
+    <EmbeddedResource Include="WININET-64.dll" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib" />

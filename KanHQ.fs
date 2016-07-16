@@ -25,7 +25,7 @@ open Sayuri.Windows.Forms
 #if LIGHT
 [<assembly: AssemblyTitle "艦これ 司令部室Light"; AssemblyFileVersion "1.0.7.0"; AssemblyVersion "1.0.7.0">]
 #else
-[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "1.0.8.0"; AssemblyVersion "1.0.8.0">]
+[<assembly: AssemblyTitle "艦これ 司令部室";      AssemblyFileVersion "1.0.9.0"; AssemblyVersion "1.0.9.0">]
 #endif
 do
     let values = [|
@@ -100,16 +100,21 @@ extern nativeint private LoadLibrary(string lpFileName);
 [<DllImport("wininet.dll", CharSet = CharSet.Unicode)>]
 extern void private SetCallback(OnRequest onRequest, OnResponse onResponse);
 
-let wininet =
+do
     let modules = [| for m in Process.GetCurrentProcess().Modules -> m |]
     if modules |> Array.exists (fun m -> StringComparer.InvariantCultureIgnoreCase.Equals(m.ModuleName, "wininet.dll")) then
         if modules |> Array.exists (fun m -> m.FileName.ToUpperInvariant().Contains "JWORD") then
             MessageBox.Show("JWordにより処理がブロックされました。\r\n必要なければJWordをアンインストールしてください。", "艦これ 司令部室") |> ignore
             Environment.Exit 1
         modules |> Array.map (fun m -> m.FileName) |> String.concat ", " |> failwithf "wininet.dllを読み込めませんでした。次のモジュールが既に読み込まれています。: %s"
-    LoadLibrary(if IntPtr.Size = 8 then @"x64\wininet.dll" else @"x86\wininet.dll")
-
-let captureSupported = Capture.test ()
+    let load name =
+        use src = IntPtr.Size * 8 |> sprintf "%s-%d.dll" name |> Assembly.GetExecutingAssembly().GetManifestResourceStream
+        use reader = new BinaryReader(src)
+        let dllpath = Path.Combine(Application.LocalUserAppDataPath, sprintf "%s.dll" name)
+        File.WriteAllBytes(dllpath, src.Length |> int |> reader.ReadBytes)
+        LoadLibrary dllpath |> ignore
+    load "WININET"
+    if Capture.supported () then load "d3d9"
 #endif
 
 #if UNUSED
@@ -1057,7 +1062,7 @@ let mainWindow () = createForm (browserWidth + 181) 668 "艦これ 司令部室"
     let tweet = new Button(Location = Point(browserWidth + 91, 548), Anchor = anchorTR, Text = "呟く")
     tweet.Click.Add(fun _ -> tweetImage webBrowser form)
 
-    let capture = new Button(Location = Point(browserWidth + 10, 576), Anchor = anchorTR, Text = "動画保存", Enabled = captureSupported)
+    let capture = new Button(Location = Point(browserWidth + 10, 576), Anchor = anchorTR, Text = "動画保存", Enabled = Capture.supported ())
     capture.Click.Add(let state = ref None in fun _ ->
         match !state with
         | None ->
