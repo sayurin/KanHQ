@@ -51,7 +51,7 @@ struct session {
 static std::unordered_map<HINTERNET, session> sessions;
 
 void STDAPICALLTYPE SetCallback(decltype(OnRequest) onRequest, decltype(OnResponse) onResponse) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 	OnRequest = onRequest;
 	OnResponse = onResponse;
 }
@@ -87,7 +87,7 @@ static void callOnResponse(const decltype(sessions)::iterator& itor) {
 
 
 INTERNETAPI_(HINTERNET) HttpOpenRequestA(_In_ HINTERNET hConnect, _In_opt_ LPCSTR lpszVerb, _In_opt_ LPCSTR lpszObjectName, _In_opt_ LPCSTR lpszVersion, _In_opt_ LPCSTR lpszReferrer, _In_opt_z_ LPCSTR FAR * lplpszAcceptTypes, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 
 	_RPTWN(_CRT_WARN, L"WININET: HttpOpenRequestA(%S %S)\n", lpszVerb, lpszObjectName);
 	auto file = CALLFUNC(HttpOpenRequestA, hConnect, lpszVerb, lpszObjectName, lpszVersion, lpszReferrer, lplpszAcceptTypes, dwFlags, dwContext);
@@ -98,7 +98,7 @@ INTERNETAPI_(HINTERNET) HttpOpenRequestA(_In_ HINTERNET hConnect, _In_opt_ LPCST
 }
 
 INTERNETAPI_(HINTERNET) HttpOpenRequestW(_In_ HINTERNET hConnect, _In_opt_ LPCWSTR lpszVerb, _In_opt_ LPCWSTR lpszObjectName, _In_opt_ LPCWSTR lpszVersion, _In_opt_ LPCWSTR lpszReferrer, _In_opt_z_ LPCWSTR FAR * lplpszAcceptTypes, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 
 	_RPTWN(_CRT_WARN, L"WININET: HttpOpenRequestW(%s %s)\n", lpszVerb, lpszObjectName);
 	auto file = CALLFUNC(HttpOpenRequestW, hConnect, lpszVerb, lpszObjectName, lpszVersion, lpszReferrer, lplpszAcceptTypes, dwFlags, dwContext);
@@ -109,7 +109,7 @@ INTERNETAPI_(HINTERNET) HttpOpenRequestW(_In_ HINTERNET hConnect, _In_opt_ LPCWS
 }
 
 BOOLAPI HttpSendRequestA(_In_ HINTERNET hRequest, _In_reads_opt_(dwHeadersLength) LPCSTR lpszHeaders, _In_ DWORD dwHeadersLength, _In_reads_bytes_opt_(dwOptionalLength) LPVOID lpOptional, _In_ DWORD dwOptionalLength) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 
 	_RPTWN(_CRT_WARN, L"WININET: HttpSendRequestA(opt=%d)\n", dwOptionalLength);
 	auto result = CALLFUNC(HttpSendRequestA, hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
@@ -118,7 +118,7 @@ BOOLAPI HttpSendRequestA(_In_ HINTERNET hRequest, _In_reads_opt_(dwHeadersLength
 }
 
 BOOLAPI HttpSendRequestW(_In_ HINTERNET hRequest, _In_reads_opt_(dwHeadersLength) LPCWSTR lpszHeaders, _In_ DWORD dwHeadersLength, _In_reads_bytes_opt_(dwOptionalLength) LPVOID lpOptional, _In_ DWORD dwOptionalLength) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 
 	_RPTWN(_CRT_WARN, L"WININET: HttpSendRequestW(opt=%d)\n", dwOptionalLength);
 	auto result = CALLFUNC(HttpSendRequestW, hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
@@ -127,7 +127,7 @@ BOOLAPI HttpSendRequestW(_In_ HINTERNET hRequest, _In_reads_opt_(dwHeadersLength
 }
 
 BOOLAPI InternetReadFile(_In_ HINTERNET hFile, _Out_writes_bytes_(dwNumberOfBytesToRead) __out_data_source(NETWORK) LPVOID lpBuffer, _In_ DWORD dwNumberOfBytesToRead, _Out_ LPDWORD lpdwNumberOfBytesRead) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 
 	auto result = CALLFUNC(InternetReadFile, hFile, lpBuffer, dwNumberOfBytesToRead, lpdwNumberOfBytesRead);
 	auto lastError = GetLastError();
@@ -152,7 +152,7 @@ BOOLAPI InternetReadFile(_In_ HINTERNET hFile, _Out_writes_bytes_(dwNumberOfByte
 }
 
 BOOLAPI InternetQueryDataAvailable(_In_ HINTERNET hFile, _Out_opt_ __out_data_source(NETWORK) LPDWORD lpdwNumberOfBytesAvailable, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 
 	auto result = CALLFUNC(InternetQueryDataAvailable, hFile, lpdwNumberOfBytesAvailable, dwFlags, dwContext);
 	auto lastError = GetLastError();
@@ -170,7 +170,7 @@ BOOLAPI InternetQueryDataAvailable(_In_ HINTERNET hFile, _Out_opt_ __out_data_so
 }
 
 BOOLAPI InternetCloseHandle(_In_ HINTERNET hInternet) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 
 	{
 		std::lock_guard<std::mutex> lock(mutex);

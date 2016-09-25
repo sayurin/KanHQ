@@ -171,7 +171,7 @@ ULONG STDMETHODCALLTYPE IDirect3D9Ex_Release_Hook(IDirect3D9Ex* This) {
 }
 
 void STDMETHODCALLTYPE GetParameter(UINT* width, UINT* height, GUID* subtype, unsigned* fps) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 	*width = desc.Width;
 	*height = desc.Height;
 	// https://msdn.microsoft.com/en-us/library/aa370819(v=vs.85).aspx#Creating_Subtype_GUIDs_from_FOURCCs_and_D3DFORMAT_Values
@@ -182,18 +182,18 @@ void STDMETHODCALLTYPE GetParameter(UINT* width, UINT* height, GUID* subtype, un
 }
 
 void STDMETHODCALLTYPE Start(FramePtr frame) {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 	Frame = frame;
 }
 
 void STDMETHODCALLTYPE Stop() {
-	__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+	DLLEXPORT;
 	Frame = nullptr;
 }
 
 extern "C"{
 	IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion) {
-		__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+		DLLEXPORT;
 		auto pD3D = CALLFUNC(Direct3DCreate9, SDKVersion);
 		if (pD3D) {
 			IDirect3D9_HookCount++;
@@ -204,7 +204,7 @@ extern "C"{
 		return pD3D;
 	}
 	HRESULT WINAPI Direct3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** ppD3D) {
-		__pragma(comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__));
+		DLLEXPORT;
 		auto result = CALLFUNC(Direct3DCreate9Ex, SDKVersion, ppD3D);
 		if (result == S_OK) {
 			auto pD3DEx = *ppD3D;
