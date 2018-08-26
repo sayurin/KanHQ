@@ -9,9 +9,8 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>KanHQ</RootNamespace>
     <AssemblyName>KanHQ</AssemblyName>
-    <TargetFrameworkVersion>v2.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <TargetFSharpCoreVersion>2.3.0.0</TargetFSharpCoreVersion>
     <Name>KanHQ</Name>
     <Win32Resource>KanHQ.res</Win32Resource>
     <WarningLevel>3</WarningLevel>
@@ -25,6 +24,7 @@
     <Tailcalls>false</Tailcalls>
     <DefineConstants>TRACE;DEBUG</DefineConstants>
     <OutputPath>bin\Debug\</OutputPath>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -32,6 +32,7 @@
     <Tailcalls>true</Tailcalls>
     <DefineConstants>TRACE</DefineConstants>
     <OutputPath>bin\Release\</OutputPath>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'LightRelease|AnyCPU' ">
     <AssemblyName>KanHQLight</AssemblyName>
@@ -40,6 +41,7 @@
     <Tailcalls>true</Tailcalls>
     <DefineConstants>TRACE;LIGHT</DefineConstants>
     <OutputPath>bin\LightRelease\</OutputPath>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
@@ -98,12 +100,13 @@
     <EmbeddedResource Include="d3d9-64.dll" />
     <EmbeddedResource Include="WININET-32.dll" />
     <EmbeddedResource Include="WININET-64.dll" />
+    <Content Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="mscorlib" />
-    <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-      <Private>True</Private>
+    <Reference Include="FSharp.Core">
+      <HintPath>packages\FSharp.Core.4.5.2\lib\net45\FSharp.Core.dll</HintPath>
     </Reference>
+    <Reference Include="mscorlib" />
     <Reference Include="System" />
     <Reference Include="System.Configuration" />
     <Reference Include="System.Drawing" />

@@ -1,12 +1,8 @@
 ﻿namespace Sayuri.Windows.Forms
 open System
-open System.Drawing
-open System.Drawing.Imaging
 open System.Reflection
 open System.Runtime.InteropServices
 open System.Windows.Forms
-
-#nowarn "9"
 
 [<ComImport; Guid("6d5140c1-7436-11ce-8034-00aa006009fa"); InterfaceType(ComInterfaceType.InterfaceIsIUnknown)>]
 type private IServiceProvider =
@@ -89,13 +85,24 @@ type private IHTMLStyleSheet =
 
 [<ComImport; Guid("332c4425-26cb-11d0-b483-00c04fd90119"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
 type private IHTMLDocument2 =
+    [<DispId((*DISPID_IHTMLDOCUMENT2_BODY*)1004)>]
+    abstract member body : IHTMLElement
     [<DispId((*DISPID_IHTMLDOCUMENT2_PARENTWINDOW*)1034)>]
     abstract member parentWindow : IHTMLWindow2
     [<DispId((*DISPID_IHTMLDOCUMENT2_CREATESTYLESHEET*)1071)>]
     abstract member createStyleSheet : bstrHref : string * lIndex : int -> IHTMLStyleSheet
 
+[<ComImport; Guid("3050f21f-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
+type private IHTMLElementCollection =
+    [<DispId((*DISPID_IHTMLELEMENTCOLLECTION_ITEM*)0)>]
+    abstract member item : name : obj * index : obj -> [<return: MarshalAs(UnmanagedType.IDispatch)>] obj
+    [<DispId((*DISPID_IHTMLELEMENTCOLLECTION_LENGTH*)1500)>]
+    abstract member length : int with get, set
+
 [<ComImport; Guid("3050f485-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
 type private IHTMLDocument3 =
+    [<DispId((*DISPID_IHTMLDOCUMENT3_GETELEMENTSBYTAGNAME*)1087)>]
+    abstract member getElementsByTagName : v : string -> IHTMLElementCollection
     [<DispId((*DISPID_IHTMLDOCUMENT3_GETELEMENTBYID*)1088)>]
     abstract member getElementById : v : string -> obj
 
@@ -104,28 +111,14 @@ type private IHTMLFrameBase2 =
     [<DispId((*DISPID_IHTMLFRAMEBASE2_CONTENTWINDOW*)0x80010BC1)>]
     abstract member contentWindow : IHTMLWindow2
 
-[<ComImport; Guid("3050f25f-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
-type private IHTMLEmbedElement =
-    interface
-    end
-
-[<ComImport; Guid("3050f24f-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
-type private IHTMLObjectElement =
-    [<DispId((*DISPID_IHTMLOBJECTELEMENT_OBJECT*)0x80010BB9)>]
-    abstract member ``object`` : [<return: MarshalAs(UnmanagedType.IDispatch)>] obj
+[<ComImport; Guid("305106e4-98b5-11cf-bb82-00aa00bdce0b"); InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
+type private IHTMLCanvasElement =
+    [<DispId((*DISPID_IHTMLCANVASELEMENT_TODATAURL*)1002)>]
+    abstract member toDataURL : ``type`` : string * jpegquality : obj -> string
 
 [<ComImport; Guid "34A715A0-6587-11D0-924A-0020AFC7AC4D"; InterfaceType(ComInterfaceType.InterfaceIsIDispatch)>]
 type private DWebBrowserEvents2 =
     [<DispId(273)>] abstract member NewWindow3 : [<In; Out; MarshalAs(UnmanagedType.IDispatch)>] ppDisp : obj byref * [<In; Out; MarshalAs(UnmanagedType.VariantBool)>] Cancel : bool byref * dwFlags : uint32 * bstrUrlContext : string * bstrUrl : string -> unit
-
-[<StructLayout(LayoutKind.Sequential, Pack = 4); AllowNullLiteral>]
-type DVTARGETDEVICE =
-    val tdSize : int
-    val tdDriverNameOffset : uint16
-    val tdDeviceNameOffset : uint16
-    val tdPortNameOffset : uint16
-    val tdExtDevmodeOffset : uint16
-    new () = { tdSize = Marshal.SizeOf typeof<DVTARGETDEVICE>; tdDriverNameOffset = 0us; tdDeviceNameOffset = 0us; tdPortNameOffset = 0us; tdExtDevmodeOffset = 0us; }
 
 [<StructLayout(LayoutKind.Sequential, Pack = 4); AllowNullLiteral>]
 type RECT =
@@ -134,17 +127,6 @@ type RECT =
     val width : int
     val height : int
     new (left, top, width, height) = { left = left; top = top; width = width; height = height }
-
-[<ComImport; Guid("0000010d-0000-0000-C000-000000000046"); InterfaceType(ComInterfaceType.InterfaceIsIUnknown)>]
-type IViewObject =
-    abstract member Draw : [<In; MarshalAs(UnmanagedType.U4)>] dwDrawAspect : int * lindex : int * pvAspect : nativeint * [<In>] ptd : DVTARGETDEVICE * hdcTargetDev : nativeint * hdcDraw : nativeint * [<In>] lprcBounds : RECT * [<In>] lprcWBounds : RECT * pfnContinue : nativeint * [<In>] dwContinue : nativeint -> unit
-    abstract member GetColorSet : [<In; MarshalAs(UnmanagedType.U4)>] dwDrawAspect : int * lindex : int * pvAspect : nativeint * [<In>] ptd : obj * hicTargetDev : nativeint * [<Out>] ppColorSet : obj -> unit
-    abstract member Freeze : [<In; MarshalAs(UnmanagedType.U4)>] dwDrawAspect : int * lindex : int * pvAspect : nativeint * [<Out>] pdwFreeze : nativeint -> unit
-    abstract member Unfreeze : [<In; MarshalAs(UnmanagedType.U4)>] dwFreeze : int -> unit
-    [<PreserveSig>]
-    abstract member SetAdvise : [<In; MarshalAs(UnmanagedType.U4)>] aspects : int * [<In; MarshalAs(UnmanagedType.U4)>] advf : int * [<In; MarshalAs(UnmanagedType.Interface)>] pAdvSink : obj -> unit
-    [<PreserveSig>]
-    abstract member GetAdvise : [<In; Out; MarshalAs(UnmanagedType.LPArray)>] paspects : int[] * [<In; Out; MarshalAs(UnmanagedType.LPArray)>] advf : int[] * [<In; Out; MarshalAs(UnmanagedType.LPArray)>] pAdvSink : obj[] -> unit
 
 [<StructLayout(LayoutKind.Sequential)>]
 type private POINT =
@@ -277,20 +259,16 @@ type WebBrowser2 () as self =
         wb.RegisterAsBrowser <- true
         wb.Application
     static member GetCapture(element : obj) =
-        let element = element :?> IHTMLElement
-        let size = Size(element.offsetWidth, element.offsetHeight)
-        let view = match element with
-                   | :? IHTMLObjectElement as objectElement -> objectElement.``object`` :?> IViewObject
-                   | :? IHTMLEmbedElement -> element :?> IViewObject
-                   | _ -> failwith "unknown element"
-        let ptd = DVTARGETDEVICE()
-        let bounds = RECT(0, 0, size.Width, size.Height)
-        let capture hdc =
-            view.Draw((*DVASPECT_CONTENT*)1, 0, 0n, ptd, 0n, hdc, bounds, null, 0n, 0n)
-        size, capture
+        let canvas = element :?> IHTMLCanvasElement
+        let dataUrl = canvas.toDataURL("image/png", 1)
+        if dataUrl.StartsWith "data:image/png;base64," |> not then failwith "invalid data url"
+        dataUrl.Substring 22 |> Convert.FromBase64String
     static member GetElementById((document : obj), id) =
         let element = (document :?> IHTMLDocument3).getElementById id
         if element = null then None else Some element
+    static member GetElementsByTagName((document : obj), name) =
+        let elements = (document :?> IHTMLDocument3).getElementsByTagName name
+        [| for i in 0 .. elements.length -> elements.item(null, i) |]
     static member GetFrameDocument(iframe : obj) =
         (((iframe :?> IHTMLFrameBase2).contentWindow :?> IServiceProvider).QueryService(typeof<IWebBrowserApp>.GUID, typeof<IWebBrowser2>.GUID) :?> IWebBrowser2).Document
     member this.Zoom(percent : int) =

@@ -1,42 +1,54 @@
-#define _USING_V110_SDK71_				// for xp
 #define _WINX32_						// don't import WinInet.h and Winineti.h
 #define WIN32_LEAN_AND_MEAN				// avoid Winsock
+#define NOMINMAX						// for std::min
 #define _HAS_EXCEPTIONS 0
-#include <algorithm>					// for std::copy_n
-#include <memory>						// for std::make_unique, std::unique_ptr
+#include <algorithm>					// for std::copy_n, std::equal
+#include <fstream>						// for std::ofstream
+#include <map>							// for std::map
 #include <mutex>						// for std::lock_guard, std::mutex
+#include <optional>						// for std::optional
+#include <regex>						// for std::wregex, std::wsmatch, std::regex_search
 #include <string>						// for std::wstring
-#include <unordered_map>				// for std::unordered_map
+#include <string_view>					// for ""sv
 #include <vector>						// for std::vector
 #include <crtdbg.h>						// for _ASSERTE, _RPTW0, _RPTWN
 #include <Windows.h>
 #include <WinSock2.h>					// for SOCKET
 #include <WinInet.h>
 #include <Winineti.h>
+using namespace std::literals;
 
 #define DLLNAME "WININET.dll"
 #include "../callproc.h"
+
+template<class Size, class Data>
+static constexpr auto size_as(Data const& data) {
+	return static_cast<Size>(std::size(data));
+}
 
 static inline void append(std::vector<unsigned char>& buffer, const void* src, std::size_t count) {
 	buffer.resize(size(buffer) + count);
 	std::copy_n(reinterpret_cast<const unsigned char*>(src), count, begin(buffer) + size(buffer) - count);
 }
 
-class char2wchar {
-	std::unique_ptr<wchar_t[]> buffer;
-public:
-	char2wchar(const char* src) {
-		if (!src)
-			return;
-		auto length = MultiByteToWideChar(CP_THREAD_ACP, 0, src, -1, nullptr, 0);
-		buffer = std::make_unique<wchar_t[]>(length);
-		auto result = MultiByteToWideChar(CP_THREAD_ACP, 0, src, -1, buffer.get(), length);
-		_ASSERTE(result == length);
-	}
-	operator const wchar_t*() const {
-		return buffer ? buffer.get() : nullptr;
+struct LastError {
+	DWORD value = GetLastError();
+	~LastError() {
+		SetLastError(value);
 	}
 };
+
+static auto to_wstring(const char* str) {
+	std::wstring wstr;
+	if (str) {
+		auto len = static_cast<int>(strlen(str));
+		auto wlen1 = MultiByteToWideChar(CP_THREAD_ACP, 0, str, len, nullptr, 0);
+		wstr.resize(wlen1);
+		auto wlen2 = MultiByteToWideChar(CP_THREAD_ACP, 0, str, len, data(wstr), wlen1);
+		_ASSERTE(wlen1 == wlen2);
+	}
+	return wstr;
+}
 
 
 static bool (CALLBACK* OnRequest)(const wchar_t* path) = nullptr;
@@ -46,21 +58,27 @@ struct session {
 	std::wstring path;
 	std::vector<unsigned char> request;
 	std::vector<unsigned char> response;
-	session(const wchar_t* path) : path(path) {}
+	session(std::wstring const& path) : path(path) {}
 };
-static std::unordered_map<HINTERNET, session> sessions;
+static std::map<HINTERNET, session> sessions;
+static std::optional<std::tuple<HINTERNET, std::optional<std::string>>> injectTarget;
 
-void STDAPICALLTYPE SetCallback(decltype(OnRequest) onRequest, decltype(OnResponse) onResponse) {
+void STDAPICALLTYPE ZzzSetCallback(decltype(OnRequest) onRequest, decltype(OnResponse) onResponse) {
 	DLLEXPORT;
 	OnRequest = onRequest;
 	OnResponse = onResponse;
 }
 
-static void addSession(HINTERNET file, const wchar_t* path) {
-	if (file && OnRequest && OnRequest(path)) {
-		std::lock_guard<std::mutex> lock(mutex);
-		sessions.emplace(file, path);
-		_RPTWN(_CRT_WARN, L"WININET: active sessions = %d\n", sessions.size());
+static void addSession(HINTERNET file, std::wstring const& path) {
+	if (file) {
+		if (OnRequest && OnRequest(path.c_str())) {
+			std::lock_guard<std::mutex> lock(mutex);
+			sessions.emplace(file, path);
+			_RPTWN(_CRT_WARN, L"WININET: active sessions = %d\n", sessions.size());
+		}
+		static auto target = L"/kcs2/index.php"s;
+		if (size(target) < size(path) && std::equal(begin(target), end(target), begin(path)))
+			injectTarget = { file, {} };
 	}
 }
 
@@ -76,6 +94,17 @@ static void addRequest(BOOL result, HINTERNET hRequest, LPVOID lpOptional, DWORD
 }
 
 static void callOnResponse(const decltype(sessions)::iterator& itor) {
+#if 0
+	static std::wregex re{ LR"(^/(?:[^/?]+/)*([^/?]+))" };
+	static int index = 0;
+	{
+		std::wsmatch m;
+		std::regex_search(itor->second.path, m, re);
+		auto filename = m[1].str() + L'-' + std::to_wstring(index++);
+		_RPTWN(_CRT_WARN, L"WININET: write %s => %s\n", itor->second.path.c_str(), filename.c_str());
+		std::ofstream{ filename }.write(reinterpret_cast<const char*>(data(itor->second.response)), size(itor->second.response));
+	}
+#endif
 	if (OnResponse) {
 		auto& request = itor->second.request;
 		auto& response = itor->second.response;
@@ -92,7 +121,7 @@ INTERNETAPI_(HINTERNET) HttpOpenRequestA(_In_ HINTERNET hConnect, _In_opt_ LPCST
 	_RPTWN(_CRT_WARN, L"WININET: HttpOpenRequestA(%S %S)\n", lpszVerb, lpszObjectName);
 	auto file = CALLFUNC(HttpOpenRequestA, hConnect, lpszVerb, lpszObjectName, lpszVersion, lpszReferrer, lplpszAcceptTypes, dwFlags, dwContext);
 	auto lastError = GetLastError();
-	addSession(file, char2wchar(lpszObjectName));
+	addSession(file, to_wstring(lpszObjectName));
 	SetLastError(lastError);
 	return file;
 }
@@ -100,9 +129,9 @@ INTERNETAPI_(HINTERNET) HttpOpenRequestA(_In_ HINTERNET hConnect, _In_opt_ LPCST
 INTERNETAPI_(HINTERNET) HttpOpenRequestW(_In_ HINTERNET hConnect, _In_opt_ LPCWSTR lpszVerb, _In_opt_ LPCWSTR lpszObjectName, _In_opt_ LPCWSTR lpszVersion, _In_opt_ LPCWSTR lpszReferrer, _In_opt_z_ LPCWSTR FAR * lplpszAcceptTypes, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext) {
 	DLLEXPORT;
 
-	_RPTWN(_CRT_WARN, L"WININET: HttpOpenRequestW(%s %s)\n", lpszVerb, lpszObjectName);
 	auto file = CALLFUNC(HttpOpenRequestW, hConnect, lpszVerb, lpszObjectName, lpszVersion, lpszReferrer, lplpszAcceptTypes, dwFlags, dwContext);
 	auto lastError = GetLastError();
+	_RPTWN(_CRT_WARN, L"WININET: HttpOpenRequestW(%s %s) => 0x%08x\n", lpszVerb, lpszObjectName, file);
 	addSession(file, lpszObjectName);
 	SetLastError(lastError);
 	return file;
@@ -120,67 +149,114 @@ BOOLAPI HttpSendRequestA(_In_ HINTERNET hRequest, _In_reads_opt_(dwHeadersLength
 BOOLAPI HttpSendRequestW(_In_ HINTERNET hRequest, _In_reads_opt_(dwHeadersLength) LPCWSTR lpszHeaders, _In_ DWORD dwHeadersLength, _In_reads_bytes_opt_(dwOptionalLength) LPVOID lpOptional, _In_ DWORD dwOptionalLength) {
 	DLLEXPORT;
 
-	_RPTWN(_CRT_WARN, L"WININET: HttpSendRequestW(opt=%d)\n", dwOptionalLength);
+	_RPTWN(_CRT_WARN, L"WININET: HttpSendRequestW(0x%08x, opt=%d)\n", hRequest, dwOptionalLength);
 	auto result = CALLFUNC(HttpSendRequestW, hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
 	addRequest(result, hRequest, lpOptional, dwOptionalLength);
 	return result;
 }
 
+BOOLAPI InternetSetOptionA(_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength) {
+	DLLEXPORT;
+
+	_RPTWN(_CRT_WARN, L"WININET: InternetSetOptionA(0x%08x, %d) called\n", hInternet, dwOption);
+	return CALLFUNC(InternetSetOptionA, hInternet, dwOption, lpBuffer, dwBufferLength);
+}
+
+BOOLAPI InternetSetOptionW(_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength) {
+	DLLEXPORT;
+
+	_RPTWN(_CRT_WARN, L"WININET: InternetSetOptionW(0x%08x, %d) called\n", hInternet, dwOption);
+	return CALLFUNC(InternetSetOptionW, hInternet, dwOption, lpBuffer, dwBufferLength);
+}
+
 BOOLAPI InternetReadFile(_In_ HINTERNET hFile, _Out_writes_bytes_(dwNumberOfBytesToRead) __out_data_source(NETWORK) LPVOID lpBuffer, _In_ DWORD dwNumberOfBytesToRead, _Out_ LPDWORD lpdwNumberOfBytesRead) {
 	DLLEXPORT;
 
+	if (injectTarget)
+		if (auto& [injectHandle, rest] = *injectTarget; injectHandle == hFile) {
+			_RPTWN(_CRT_WARN, L"WININET: InternetReadFile(0x%08x) injected\n", hFile);
+			_ASSERTE(rest && lpBuffer && 0 < dwNumberOfBytesToRead && lpdwNumberOfBytesRead);
+			dwNumberOfBytesToRead = std::min(dwNumberOfBytesToRead, size_as<DWORD>(*rest));
+			std::copy_n(rest->begin(), dwNumberOfBytesToRead, reinterpret_cast<char*>(lpBuffer));
+			*lpdwNumberOfBytesRead = dwNumberOfBytesToRead;
+			rest->erase(0, dwNumberOfBytesToRead);
+			SetLastError(0);
+			return true;
+		}
+
 	auto result = CALLFUNC(InternetReadFile, hFile, lpBuffer, dwNumberOfBytesToRead, lpdwNumberOfBytesRead);
-	auto lastError = GetLastError();
-	{
-		std::lock_guard<std::mutex> lock(mutex);
-		auto itor = sessions.find(hFile);
-		if (itor != sessions.end()) {
-			_RPTWN(_CRT_WARN, L"WININET: InternetReadFile(%d => %d, %s, %d) => %d, %d\n", dwNumberOfBytesToRead, *lpdwNumberOfBytesRead, itor->second.path.c_str(), itor->second.response.size(), result, lastError);
-			if (result) {
-				auto read = *lpdwNumberOfBytesRead;
-				if (0 < read)
-					append(itor->second.response, lpBuffer, read);
-				else
-					callOnResponse(itor);
-			} else
-				sessions.erase(itor);
-		} else
-			_RPTWN(_CRT_WARN, L"WININET: InternetReadFile(%d => %d) %d, %d\n", dwNumberOfBytesToRead, *lpdwNumberOfBytesRead, result, lastError);
+	LastError err;
+	std::lock_guard lock{ mutex };
+	_RPTWN(_CRT_WARN, L"WININET: InternetReadFile(0x%08x, %d) %d, %d, %d\n", hFile, dwNumberOfBytesToRead, result, err.value, lpdwNumberOfBytesRead ? *lpdwNumberOfBytesRead : -1);
+	if (auto itor = sessions.find(hFile); itor != sessions.end()) {
+		if (!result)
+			sessions.erase(itor);
+		else if (0 < *lpdwNumberOfBytesRead)
+			append(itor->second.response, lpBuffer, *lpdwNumberOfBytesRead);
+		else
+			callOnResponse(itor);
 	}
-	SetLastError(lastError);
 	return result;
 }
 
 BOOLAPI InternetQueryDataAvailable(_In_ HINTERNET hFile, _Out_opt_ __out_data_source(NETWORK) LPDWORD lpdwNumberOfBytesAvailable, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext) {
 	DLLEXPORT;
 
-	auto result = CALLFUNC(InternetQueryDataAvailable, hFile, lpdwNumberOfBytesAvailable, dwFlags, dwContext);
-	auto lastError = GetLastError();
-	if (result && *lpdwNumberOfBytesAvailable == 0) {
-		std::lock_guard<std::mutex> lock(mutex);
-		auto itor = sessions.find(hFile);
-		if (itor != sessions.end()) {
-			_RPTWN(_CRT_WARN, L"WININET: InternetQueryDataAvailable(%d, %s) => %d, %d\n", *lpdwNumberOfBytesAvailable, itor->second.path.c_str(), result, lastError);
+	if (injectTarget)
+		if (auto& [injectHandle, rest] = *injectTarget; injectHandle == hFile) {
+			if (!rest) {
+				rest = ""s;
+				for (DWORD available, read;;) {
+					auto result = CALLFUNC(InternetQueryDataAvailable, hFile, &available, dwFlags, dwContext);
+					_ASSERTE(result);
+					if (available == 0)
+						break;
+					rest->resize(rest->size() + available);
+					result = CALLFUNC(InternetReadFile, hFile, rest->data() + rest->size() - available, available, &read);
+					_ASSERTE(result && read == available);
+				}
+				auto original = size_as<int>(*rest);
+				// https://github.com/axios/axios/blob/master/UPGRADE_GUIDE.md#05x---060
+				// "the polyfill has been removed, and you will need to supply it yourself if your environment needs it."
+				*rest = std::regex_replace(*rest, std::regex{ R"(<script src="[^"]*/axios.min.js"></script>)" },
+					R"(<script src="https://cdn.jsdelivr.net/npm/es6-promise@4/dist/es6-promise.auto.min.js"></script>$&)");
+				// WebOC on Win7 has PointerEvent exists, but navigator.msPointerEnabled is false. 
+				// enable preserveDrawingBuffer for capturing.
+				*rest = std::regex_replace(*rest, std::regex{ R"(<script src="[^"]*/pixi.min.js"></script>)" },
+					R"(<script>if(!navigator.msPointerEnabled)delete PointerEvent;</script>$&<script>PIXI.settings.RENDER_OPTIONS.preserveDrawingBuffer=true;</script>)");
+				_RPTWN(_CRT_WARN, L"WININET: InternetQueryDataAvailable(0x%08x) injected %d to %d\n", hFile, original, size_as<int>(*rest));
+			}
+			if (lpdwNumberOfBytesAvailable)
+				*lpdwNumberOfBytesAvailable = size_as<DWORD>(*rest);
+			SetLastError(0);
+			return true;
+		}
+
+	DWORD available;
+	auto result = CALLFUNC(InternetQueryDataAvailable, hFile, &available, dwFlags, dwContext);
+	if (lpdwNumberOfBytesAvailable)
+		*lpdwNumberOfBytesAvailable = available;
+	LastError err;
+	_RPTWN(_CRT_WARN, L"WININET: InternetQueryDataAvailable(0x%08x) => %d, %d, %d\n", hFile, result, err.value, available);
+	if (result && available == 0) {
+		std::lock_guard lock{ mutex };
+		if (auto itor = sessions.find(hFile); itor != sessions.end())
 			callOnResponse(itor);
-		} else
-			_RPTWN(_CRT_WARN, L"WININET: InternetQueryDataAvailable(%d) => %d, %d\n", *lpdwNumberOfBytesAvailable, result, lastError);
 	}
-	SetLastError(lastError);
 	return result;
 }
 
 BOOLAPI InternetCloseHandle(_In_ HINTERNET hInternet) {
 	DLLEXPORT;
 
+	_RPTWN(_CRT_WARN, L"WININET: InternetCloseHandle(0x%08x)\n", hInternet);
 	{
-		std::lock_guard<std::mutex> lock(mutex);
-		auto itor = sessions.find(hInternet);
-		if (itor != sessions.end()) {
-			_RPTWN(_CRT_WARN, L"WININET: InternetCloseHandle(%s)\n", itor->second.path.c_str());
+		std::lock_guard lock{ mutex };
+		if (auto itor = sessions.find(hInternet); itor != sessions.end())
 			callOnResponse(itor);
-		} else
-			_RPTW0(_CRT_WARN, L"WININET: InternetCloseHandle()\n");
 	}
+	if (injectTarget && std::get<0>(*injectTarget) == hInternet)
+		injectTarget.reset();
 	return CALLFUNC(InternetCloseHandle, hInternet);
 }
 
@@ -227,7 +303,7 @@ FUNCTION_NAME(BOOLAPI, DetectAutoProxyUrl, (_Out_writes_(cchAutoProxyUrl) PSTR p
 FUNCTION_NAME_ORDINAL(106, void CALLBACK, DispatchAPICall, (HWND hwnd, HINSTANCE hinst, LPSTR lpszCmdLine, int nCmdShow), hwnd, hinst, lpszCmdLine, nCmdShow)
 FUNCTION_NAME(STDAPI, DllCanUnloadNow, (void), )
 FUNCTION_NAME(STDAPI, DllGetClassObject, (_In_ REFCLSID rclsid, _In_ REFIID riid, _Outptr_ LPVOID FAR* ppv), rclsid, riid, ppv)
-FUNCTION_NAME(STDAPI, DllInstall, (BOOL bInstall, _In_opt_ PCWSTR pszCmdLine), bInstall, pszCmdLine)
+FUNCTION_UNKNOWN_NAME(STDAPI, DllInstall, (BOOL bInstall, _In_opt_ PCWSTR pszCmdLine), bInstall, pszCmdLine)
 FUNCTION_NAME(STDAPI, DllRegisterServer, (void), )
 FUNCTION_NAME(STDAPI, DllUnregisterServer, (void), )
 FUNCTION_NAME(BOOLAPI, FindCloseUrlCache, (_In_ HANDLE hEnumHandle), hEnumHandle)
@@ -305,6 +381,7 @@ FUNCTION_NAME(BOOLAPI, HttpEndRequestA, (_In_ HINTERNET hRequest, _Out_opt_ LPIN
 FUNCTION_NAME(BOOLAPI, HttpEndRequestW, (_In_ HINTERNET hRequest, _Out_opt_ LPINTERNET_BUFFERSW lpBuffersOut, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext), hRequest, lpBuffersOut, dwFlags, dwContext)
 FUNCTION_NAME(INTERNETAPI_(DWORD), HttpGetServerCredentials, (_In_ PWSTR pwszUrl, _Outptr_result_z_ PWSTR *ppwszUserName, _Outptr_result_z_ PWSTR *ppwszPassword), pwszUrl, ppwszUserName, ppwszPassword)
 FUNCTION_NAME(INTERNETAPI_(DWORD), HttpGetTunnelSocket, (_In_ HINTERNET hRequest, _Out_ SOCKET *pSocket, _Outptr_result_buffer_all_maybenull_(*pdwDataLength) PBYTE *ppbData, _Out_ PDWORD pdwDataLength), hRequest, pSocket, ppbData, pdwDataLength)
+FUNCTION_NAME(INTERNETAPI_(DWORD), HttpIndicatePageLoadComplete, (_In_ HTTP_DEPENDENCY_HANDLE hDependencyHandle), hDependencyHandle)
 FUNCTION_UNKNOWN_NAME(INTERNETAPI_(DWORD), HttpIsHostHstsEnabled, (_In_z_ PCWSTR pcwszUrl, _Out_ PBOOL pfIsHsts), pcwszUrl, pfIsHsts)
 FUNCTION_NAME(INTERNETAPI_(DWORD), HttpOpenDependencyHandle, (_In_ HINTERNET hRequestHandle, _In_ BOOL fBackground, _Outptr_ HTTP_DEPENDENCY_HANDLE *phDependencyHandle), hRequestHandle, fBackground, phDependencyHandle)
 //HttpOpenRequestA
@@ -345,6 +422,7 @@ FUNCTION_NAME(INTERNETAPI_(DWORD), InternetConfirmZoneCrossingA, (_In_ HWND hWnd
 FUNCTION_NAME(INTERNETAPI_(DWORD), InternetConfirmZoneCrossingW, (_In_ HWND hWnd, _In_ LPWSTR szUrlPrev, _In_ LPWSTR szUrlNew, _In_ BOOL bPost), hWnd, szUrlPrev, szUrlNew, bPost)
 FUNCTION_NAME(INTERNETAPI_(HINTERNET), InternetConnectA, (_In_ HINTERNET hInternet, _In_ LPCSTR lpszServerName, _In_ INTERNET_PORT nServerPort, _In_opt_ LPCSTR lpszUserName, _In_opt_ LPCSTR lpszPassword, _In_ DWORD dwService, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext), hInternet, lpszServerName, nServerPort, lpszUserName, lpszPassword, dwService, dwFlags, dwContext)
 FUNCTION_NAME(INTERNETAPI_(HINTERNET), InternetConnectW, (_In_ HINTERNET hInternet, _In_ LPCWSTR lpszServerName, _In_ INTERNET_PORT nServerPort, _In_opt_ LPCWSTR lpszUserName, _In_opt_ LPCWSTR lpszPassword, _In_ DWORD dwService, _In_ DWORD dwFlags, _In_opt_ DWORD_PTR dwContext), hInternet, lpszServerName, nServerPort, lpszUserName, lpszPassword, dwService, dwFlags, dwContext)
+FUNCTION_NAME(STDAPI_(DWORD), InternetConvertUrlFromWireToWideChar, (_In_reads_(cchUrl) PCSTR pcszUrl, _In_ DWORD cchUrl, _In_ PCWSTR pcwszBaseUrl, _In_ DWORD dwCodePageHost, _In_ DWORD dwCodePagePath, _In_ BOOL fEncodePathExtra, _In_ DWORD dwCodePageExtra, _Outptr_result_z_ PWSTR *ppwszConvertedUrl), pcszUrl, cchUrl, pcwszBaseUrl, dwCodePageHost, dwCodePagePath, fEncodePathExtra, dwCodePageExtra, ppwszConvertedUrl)
 FUNCTION_NAME(BOOLAPI, InternetCrackUrlA, (_In_reads_(dwUrlLength) LPCSTR lpszUrl, _In_ DWORD dwUrlLength, _In_ DWORD dwFlags, _Inout_ LPURL_COMPONENTSA lpUrlComponents), lpszUrl, dwUrlLength, dwFlags, lpUrlComponents)
 FUNCTION_NAME(BOOLAPI, InternetCrackUrlW, (_In_reads_(dwUrlLength) LPCWSTR lpszUrl, _In_ DWORD dwUrlLength, _In_ DWORD dwFlags, _Inout_ LPURL_COMPONENTSW lpUrlComponents), lpszUrl, dwUrlLength, dwFlags, lpUrlComponents)
 FUNCTION_NAME(BOOLAPI, InternetCreateUrlA, (_In_ LPURL_COMPONENTSA lpUrlComponents, _In_ DWORD dwFlags, _Out_writes_opt_(*lpdwUrlLength) LPSTR lpszUrl, _Inout_ LPDWORD lpdwUrlLength), lpUrlComponents, dwFlags, lpszUrl, lpdwUrlLength)
@@ -412,10 +490,10 @@ FUNCTION_NAME(BOOLAPI, InternetSetDialState, (_In_opt_ LPCSTR lpszConnectoid, _I
 FUNCTION_NAME(BOOLAPI, InternetSetDialStateA, (_In_opt_ LPCSTR lpszConnectoid, _In_ DWORD dwState, _Reserved_ DWORD dwReserved), lpszConnectoid, dwState, dwReserved)
 FUNCTION_NAME(BOOLAPI, InternetSetDialStateW, (_In_opt_ LPCWSTR lpszConnectoid, _In_ DWORD dwState, _Reserved_ DWORD dwReserved), lpszConnectoid, dwState, dwReserved)
 FUNCTION_NAME(INTERNETAPI_(DWORD), InternetSetFilePointer, (_In_ HINTERNET hFile, _In_ LONG lDistanceToMove, _Inout_opt_ PLONG lpDistanceToMoveHigh, _In_ DWORD dwMoveMethod, _Reserved_ DWORD_PTR dwContext), hFile, lDistanceToMove, lpDistanceToMoveHigh, dwMoveMethod, dwContext)
-FUNCTION_NAME(BOOLAPI, InternetSetOptionA, (_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength), hInternet, dwOption, lpBuffer, dwBufferLength)
+//FUNCTION_NAME(BOOLAPI, InternetSetOptionA, (_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength), hInternet, dwOption, lpBuffer, dwBufferLength)
 FUNCTION_NAME(BOOLAPI, InternetSetOptionExA, (_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength, _In_ DWORD dwFlags), hInternet, dwOption, lpBuffer, dwBufferLength, dwFlags)
 FUNCTION_NAME(BOOLAPI, InternetSetOptionExW, (_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength, _In_ DWORD dwFlags), hInternet, dwOption, lpBuffer, dwBufferLength, dwFlags)
-FUNCTION_NAME(BOOLAPI, InternetSetOptionW, (_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength), hInternet, dwOption, lpBuffer, dwBufferLength)
+//FUNCTION_NAME(BOOLAPI, InternetSetOptionW, (_In_opt_ HINTERNET hInternet, _In_ DWORD dwOption, _In_opt_ LPVOID lpBuffer, _In_ DWORD dwBufferLength), hInternet, dwOption, lpBuffer, dwBufferLength)
 FUNCTION_NAME(BOOLAPI, InternetSetPerSiteCookieDecisionA, (_In_ LPCSTR pchHostName, _In_ DWORD dwDecision), pchHostName, dwDecision)
 FUNCTION_NAME(BOOLAPI, InternetSetPerSiteCookieDecisionW, (_In_ LPCWSTR pchHostName, _In_ DWORD dwDecision), pchHostName, dwDecision)
 #undef InternetSetStatusCallback
@@ -465,7 +543,7 @@ FUNCTION_NAME(BOOLAPI, SetUrlCacheEntryInfoW, (_In_ LPCWSTR lpszUrlName, _In_ LP
 FUNCTION_NAME(BOOLAPI, SetUrlCacheGroupAttributeA, (_In_ GROUPID gid, _Reserved_ DWORD dwFlags, _In_ DWORD dwAttributes, _In_ LPINTERNET_CACHE_GROUP_INFOA lpGroupInfo, _Reserved_ LPVOID lpReserved), gid, dwFlags, dwAttributes, lpGroupInfo, lpReserved)
 FUNCTION_NAME(BOOLAPI, SetUrlCacheGroupAttributeW, (_In_ GROUPID gid, _Reserved_ DWORD dwFlags, _In_ DWORD dwAttributes, _In_ LPINTERNET_CACHE_GROUP_INFOW lpGroupInfo, _Reserved_ LPVOID lpReserved), gid, dwFlags, dwAttributes, lpGroupInfo, lpReserved)
 FUNCTION_NAME(BOOLAPI, SetUrlCacheHeaderData, (_In_ DWORD nIdx, _In_ DWORD dwData), nIdx, dwData)
-FUNCTION_UNKNOWN_NAME(INTERNETAPI_(void), ShowCertificate, (void), )
+FUNCTION_UNKNOWN_NAME(INTERNETAPI_(DWORD), ShowCertificate, (DWORD arg0, DWORD arg1), arg0, arg1)
 FUNCTION_NAME(INTERNETAPI_(DWORD), ShowClientAuthCerts, (_In_ HWND hWndParent), hWndParent)
 FUNCTION_NAME(INTERNETAPI_(DWORD), ShowSecurityInfo, (_In_ HWND hWndParent, _In_ LPINTERNET_SECURITY_INFO pSecurityInfo), hWndParent, pSecurityInfo)
 FUNCTION_NAME(INTERNETAPI_(DWORD), ShowX509EncodedCertificate, (_In_ HWND hWndParent, _In_reads_bytes_(cbCert) LPBYTE lpCert, _In_ DWORD cbCert), hWndParent, lpCert, cbCert)
@@ -495,10 +573,13 @@ FUNCTION_UNKNOWN_NAME(INTERNETAPI_(DWORD), UrlCacheServer, (void), )
 FUNCTION_NAME(URLCACHEAPI, UrlCacheSetGlobalLimit, (_In_ URL_CACHE_LIMIT_TYPE limitType, _In_ ULONGLONG ullLimit), limitType, ullLimit)
 FUNCTION_NAME(URLCACHEAPI, UrlCacheUpdateEntryExtraData, (_In_opt_ APP_CACHE_HANDLE hAppCache, _In_ PCWSTR pcwszUrl, _In_reads_bytes_(cbExtraData) const BYTE *pbExtraData, _In_ DWORD cbExtraData), hAppCache, pcwszUrl, pbExtraData, cbExtraData)
 FUNCTION_UNKNOWN_NAME(INTERNETAPI_(DWORD), UrlZonesDetach, (void), )
-#ifdef _M_IX86 /* at x86, first '_' is removed. so add extra '_'. */
-#define _GetFileExtensionFromUrl __GetFileExtensionFromUrl
+#ifdef _M_IX86
+#define PREFIX "_"
+#else
+#define PREFIX ""
 #endif
-FUNCTION_NAME(INTERNETAPI_(DWORD), _GetFileExtensionFromUrl, (_In_ LPSTR lpszUrl, _In_ DWORD dwFlags, _Inout_updates_bytes_(*pcchExt) LPSTR lpszExt, _Inout_ DWORD *pcchExt), lpszUrl, dwFlags, lpszExt, pcchExt)
+FUNCTION(PREFIX __FUNCTION__ "=" __FUNCDNAME__, __FUNCTION__, INTERNETAPI_(DWORD), _GetFileExtensionFromUrl, (_In_ LPSTR lpszUrl, _In_ DWORD dwFlags, _Inout_updates_bytes_(*pcchExt) LPSTR lpszExt, _Inout_ DWORD *pcchExt), lpszUrl, dwFlags, lpszExt, pcchExt)
+#undef PREFIX
 FUNCTION_NONAME(101, BOOL, DoConnectoidsExist, (void), )
 FUNCTION_NONAME(102, BOOLAPI, GetDiskInfoA, (_In_ PCSTR pszPath, _Out_opt_ PDWORD pdwClusterSize, _Out_opt_ PDWORDLONG pdlAvail, _Out_opt_ PDWORDLONG pdlTotal), pszPath, pdwClusterSize, pdlAvail, pdlTotal)
 FUNCTION_NONAME(103, BOOL, PerformOperationOverUrlCacheA, (_In_opt_ PCSTR pszUrlSearchPattern, _In_ DWORD dwFlags, _In_ DWORD dwFilter, _In_ GROUPID GroupId, _Reserved_ PVOID pReserved1, _Reserved_ PDWORD pdwReserved2, _Reserved_ PVOID pReserved3, _In_ CACHE_OPERATOR op, _Inout_ PVOID pOperatorData), pszUrlSearchPattern, dwFlags, dwFilter, GroupId, pReserved1, pdwReserved2, pReserved3, op, pOperatorData)
@@ -512,19 +593,19 @@ FUNCTION_UNKNOWN_NONAME(112, INTERNETAPI_(int), CHttp2Stream_ConnLimitExempted, 
 FUNCTION_NONAME(116, BOOLAPI, IsDomainLegalCookieDomainA, (_In_ LPCSTR pchDomain, _In_ LPCSTR pchFullDomain), pchDomain, pchFullDomain)
 FUNCTION_NONAME(117, BOOLAPI, IsDomainLegalCookieDomainW, (_In_ LPCWSTR pchDomain, _In_ LPCWSTR pchFullDomain), pchDomain, pchFullDomain)
 FUNCTION_NONAME(118, INTERNETAPI_(int), FindP3PPolicySymbol, (_In_ const char *pszSymbol), pszSymbol)
-FUNCTION_UNKNOWN_NONAME(120, INTERNETAPI_(void), MapResourceToPolicy, (void), )
-FUNCTION_UNKNOWN_NONAME(121, INTERNETAPI_(void), GetP3PPolicy, (void), )
-FUNCTION_UNKNOWN_NONAME(122, INTERNETAPI_(void), FreeP3PObject, (void), )
-FUNCTION_UNKNOWN_NONAME(123, INTERNETAPI_(void), GetP3PRequestStatus, (void), )
+FUNCTION_UNKNOWN_NONAME(120, INTERNETAPI_(void), GetP3PPolicy1, (DWORD arg0, DWORD arg1, DWORD arg2, DWORD arg3), arg0, arg1, arg2, arg3)
+FUNCTION_UNKNOWN_NONAME(121, INTERNETAPI_(void), GetP3PPolicy2, (DWORD arg0, DWORD arg1, DWORD arg2, DWORD arg3), arg0, arg1, arg2, arg3)
+FUNCTION_UNKNOWN_NONAME(122, INTERNETAPI_(void), FreeP3PObject1, (DWORD arg0), arg0)
+FUNCTION_UNKNOWN_NONAME(123, INTERNETAPI_(void), FreeP3PObject2, (DWORD arg0), arg0)
 FUNCTION_NONAME(346, INTERNETAPI_(DWORD), InternalInternetGetCookie, (_In_ LPCSTR lpszUrl, _Out_writes_(*lpdwDataSize) LPSTR lpszCookieData, _Inout_ DWORD *lpdwDataSize), lpszUrl, lpszCookieData, lpdwDataSize)
 FUNCTION_NONAME(401, BOOLAPI, ReadGuidsForConnectedNetworks, (_Out_opt_ DWORD *pcNetworks, _Out_opt_ PWSTR **pppwszNetworkGuids, _Out_opt_ BSTR **pppbstrNetworkNames, _Out_opt_ PWSTR **pppwszGWMacs, _Out_opt_ DWORD *pcGatewayMacs, _Out_opt_ DWORD *pdwFlags), pcNetworks, pppwszNetworkGuids, pppbstrNetworkNames, pppwszGWMacs, pcGatewayMacs, pdwFlags)
-FUNCTION_UNKNOWN_NONAME(402, INTERNETAPI_(DWORD), InternetAutoProxyGetProxyForUrl, (void), )
-FUNCTION_UNKNOWN_NONAME(403, INTERNETAPI_(DWORD), InternetAutoProxyOnSendRequestComplete, (void), )
-FUNCTION_UNKNOWN_NONAME(410, INTERNETAPI_(DWORD), GetCacheServerConnection, (void), )
-FUNCTION_UNKNOWN_NONAME(411, INTERNETAPI_(DWORD), CreateCacheServerRpcBinding, (void), )
+FUNCTION_UNKNOWN_NONAME(402, INTERNETAPI_(DWORD), InternetAutoProxyGetProxyForUrl, (DWORD arg0, DWORD arg1), arg0, arg1)
+FUNCTION_UNKNOWN_NONAME(403, INTERNETAPI_(DWORD), InternetAutoProxyOnSendRequestComplete, (DWORD arg0, DWORD arg1, DWORD arg2), arg0, arg1, arg2)
+FUNCTION_UNKNOWN_NONAME(410, INTERNETAPI_(DWORD), GetCacheServerConnection, (DWORD arg0), arg0)
+FUNCTION_UNKNOWN_NONAME(411, INTERNETAPI_(DWORD), CreateCacheServerRpcBinding, (DWORD arg0, DWORD arg1), arg0, arg1)
 FUNCTION_UNKNOWN_NONAME(413, INTERNETAPI_(DWORD), SetGlobalJetParameters, (void), )
 FUNCTION_NONAME(420, INTERNETAPI_(DWORD), IsLanConnection, (DWORD arg0), arg0)
-FUNCTION_UNKNOWN_NONAME(421, INTERNETAPI_(DWORD), IsDialUpConnection, (void), )
-FUNCTION_UNKNOWN_NONAME(422, INTERNETAPI_(DWORD), RegisterForNetworkChangeNotification, (void), )
-FUNCTION_UNKNOWN_NONAME(423, INTERNETAPI_(DWORD), UnRegisterNetworkChangeNotification, (void), )
+FUNCTION_UNKNOWN_NONAME(421, INTERNETAPI_(DWORD), IsDialUpConnection, (DWORD arg0), arg0)
+FUNCTION_UNKNOWN_NONAME(422, INTERNETAPI_(DWORD), RegisterForNetworkChangeNotification, (DWORD arg0, DWORD arg1, DWORD arg2), arg0, arg1, arg2)
+FUNCTION_UNKNOWN_NONAME(423, INTERNETAPI_(DWORD), UnRegisterNetworkChangeNotification, (DWORD arg0), arg0)
 #pragma endregion
